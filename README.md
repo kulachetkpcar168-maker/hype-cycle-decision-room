@@ -1,19 +1,15 @@
 # Hype Cycle Decision Room
 
-Mobile-first classroom decision game for Gartner Technology Hype Cycle. Three teams analyze the same Klarna/Agentic AI evidence from different business contexts, revise their decision after a twist, and deliver a one-minute pitch.
-
-## Teams
-- NovaCart — e-commerce startup
-- SiamStay — boutique hotel SME
-- MetroBank — regulated financial corporate
+Mobile-first classroom decision activity. Three server-assigned teams assess Agentic AI for customer service in different company contexts, revise a decision after new information, and pitch their context-sensitive judgment.
 
 ## Features
-- Host-controlled phases
-- Round 1 and Round 2 submissions
-- Exactly three evidence selections
-- Invest / Pilot / Wait / Stop actions
-- Before/after result and pitch mode
-- No player accounts, voting, scoring, or winner
+- Rules shown before join; 20-minute activity design
+- Four-character team codes with randomized one-to-one company assignments
+- First-device binding with same-device refresh/rejoin
+- Host-only six-phase flow and synchronized four-minute round timers
+- Four-field decisions: stage, action, one influential evidence item, one main risk
+- Private company context until the selected team pitch
+- No scoring, vote, ranking, leaderboard, or winner
 
 ## Local development
 
@@ -23,25 +19,9 @@ npm test
 ```
 
 Player: `http://localhost:4871/`
-
 Host: `http://localhost:4871/host`
 
-Local development stores state in `data/state.json`.
+Local state is stored in `data/state.json`. Reset from the host dashboard before a new class.
 
-## Vercel deployment
-
-Production requires these environment variables:
-
-```text
-UPSTASH_REDIS_REST_URL
-UPSTASH_REDIS_REST_TOKEN
-HOST_KEY
-GAME_STATE_KEY (optional)
-```
-
-Connect an Upstash Redis resource to the Vercel project, set a strong `HOST_KEY`, and redeploy. Vercel uses the catch-all function under `api/[...route].js`; static assets are served from `public/`.
-
-## Safety
-- Never commit `.env`, Redis credentials, or the host key.
-- Use the Vercel environment-variable dashboard.
-- Reset the room from the host dashboard before a new class run.
+## Production
+Set `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and a strong `HOST_KEY` in Vercel. `GAME_STATE_KEY` is optional. Never commit credentials.

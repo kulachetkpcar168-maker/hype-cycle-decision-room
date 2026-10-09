@@ -1,64 +1,25 @@
-# Hype Cycle Decision Room — MVP Specification
+# Hype Cycle Decision Room — Approved Classroom Specification
 
-## Scope
-A self-hosted classroom web app for one facilitator and exactly three participant teams. No player login, no voting, no scoring, no winner.
+## Purpose
+A 20-minute, non-competitive classroom activity for one facilitator and exactly three teams. Teams use the same Agentic AI customer-service evidence to make context-sensitive strategic judgments. There is no score, vote, ranking, leaderboard, winner, or universal correct action.
 
-## Teams
-- startup — NovaCart, a 12-person e-commerce startup with limited runway and high chat volume
-- sme — SiamStay, a five-property boutique hotel SME where multilingual service and reviews matter
-- corporate — MetroBank, a large regulated bank handling sensitive financial customer service
+## Activity timing
+Rules 2 minutes; code assignment 1; Round 1 4; new-information transition 1; Round 2 4; reveal 2; pitches 6 (2 minutes each). Takeaway/debrief is outside the 20-minute activity. Pitch screens show no timer.
 
-## Technology case
-Klarna / Agentic AI for Customer Service. The technology being positioned is Agentic AI for customer service, not Klarna as a company.
+## Teams and access
+The server creates Team A, Team B, and Team C. On every reset it randomly maps NovaCart, SiamStay, and MetroBank one-to-one to those labels and creates unique readable four-character uppercase codes excluding ambiguous characters. Players never select a team or company; they enter a code. The first join binds that team to a client-generated deviceId. The same device may refresh/rejoin; another device is rejected until reset. The browser persists teamId, code, and deviceId in localStorage. Codes and device identities are never returned by public state.
 
-## Game phases
-1. lobby
-2. round1
-3. round1_locked
-4. twist
-5. round2
-6. round2_locked
-7. pitch
-8. debrief
+## Phases
+Exactly: `lobby`, `round1`, `round2`, `reveal`, `pitch`, `takeaway`. Only the host changes phase. Entering Round 1 or Round 2 sets a server-synchronized four-minute deadline. At 30 seconds the UI warns. Zero neither advances nor locks the round.
 
-Only the host can move the phase. The host can reset the game.
+## Decisions
+Each round accepts only `stage`, `action`, exactly one `mostInfluentialEvidence`, and exactly one `mainRisk`. Stage is innovation, peak, trough, slope, or plateau. Action is invest, pilot, wait, or stop. Evidence and risk values must be approved IDs. Teams may explicitly edit/resubmit while the phase remains open. After submission the player sees a dedicated saved/waiting state. Round 2 shows the Round 1 answer and new information together.
 
-## Team submission
-Each round stores:
-- stage: one of innovation, peak, trough, slope, plateau
-- action: one of invest, pilot, wait, stop
-- evidence: exactly 3 evidence IDs
-- reason: 1–200 characters
-- kpi: one allowed KPI
-- confidence: integer 1–5
-- changedBy: required in round 2, 1–200 characters
+## Projection privacy and pitch
+Before pitch, the projected dashboard shows only Team A/B/C, access codes, join/submission status, phase, and round timer—not company identities. During pitch, only the selected team's company is shown, with before/after decisions, influential evidence, main risk, and speaking guide. No pitch timer is displayed.
 
-A team may revise its current-round answer while that round is open. Submissions are rejected after the phase is locked.
-
-## Player flow
-- Open team page from QR/link.
-- Choose one of three team contexts.
-- Read case and evidence.
-- Submit Round 1.
-- Wait for host.
-- Read Twist evidence.
-- Submit Round 2.
-- See own before/after result and a 1-minute pitch template.
-
-## Host flow
-- See all three teams and submission status.
-- Start/lock each round.
-- Reveal aggregate Round 1 answers.
-- Reveal Twist.
-- Show before/after results.
-- Enter pitch mode and select a team.
-- Show debrief.
-- Reset game.
+## Takeaway
+“Same technology. Same evidence. Different context. Different action.” The Hype Cycle informs strategic judgment rather than prescribing a universal decision.
 
 ## Technical constraints
-- Node.js standard library only; no external runtime dependencies.
-- Local development uses JSON-file persistence; production on Vercel uses Upstash Redis as shared persistent state.
-- Mobile-first Thai UI.
-- Polling for live updates.
-- Default port 4871, configurable with PORT.
-- Host state-changing API requires HOST_KEY.
+Node.js standard library only. Local JSON persistence; Upstash Redis in production. Preserve host authentication, roomId compare-and-set, atomic joins/submissions, request limits, safe public projection, and no committed credentials.

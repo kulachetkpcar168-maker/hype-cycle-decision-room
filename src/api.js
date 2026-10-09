@@ -1,6 +1,6 @@
 const {
   createInitialState,
-  joinTeam,
+  joinByCode,
   publicState,
   setActivePitchTeam,
   submitRound,
@@ -8,51 +8,80 @@ const {
 } = require('./game');
 
 function errorStatus(message) {
-  if (/state changed|refresh and retry/i.test(message)) return 409;
-  if (/Invalid team access code/i.test(message)) return 401;
-  return /Invalid|Unknown|must|requires|not open|too large|evidence|join|answer/i.test(message) ? 400 : 500;
+  if (/state changed|refresh and retry|already joined/i.test(message)) return 409;
+  if (/Invalid team access code|Invalid team credentials/i.test(message)) return 401;
+  return /Invalid|Unknown|must|requires|not open|too large|evidence|risk|join|answer|lobby/i.test(message) ? 400 : 500;
 }
 
-function teamViewer(headers) {
-  return { teamId: headers['x-team-id'], teamToken: headers['x-team-token'] };
+function playerCredentials(headers) {
+  return {
+    teamId: headers['x-team-id'],
+    code: headers['x-team-code'],
+    deviceId: headers['x-device-id'],
+  };
 }
 
-function validTeamToken(state, teamId, headers) {
-  return Boolean(headers['x-team-token']) && state.teams[teamId]?.accessToken === headers['x-team-token'];
+function validPlayer(state, credentials) {
+  const team = state.teams[credentials.teamId];
+  return Boolean(team)
+    && Boolean(credentials.code)
+    && Boolean(credentials.deviceId)
+    && team.accessCode === String(credentials.code).toUpperCase()
+    && team.deviceId === credentials.deviceId;
 }
 
 async function handleApiRequest({ method, pathname, headers = {}, body = {}, store, hostKey }) {
   try {
     if (pathname === '/api/state' && method === 'GET') {
       const state = await store.load();
-      return { status: 200, body: publicState(state, teamViewer(headers)) };
+      const credentials = playerCredentials(headers);
+      const viewer = validPlayer(state, credentials)
+        ? { teamId: credentials.teamId, deviceId: credentials.deviceId }
+        : {};
+      return { status: 200, body: publicState(state, viewer) };
     }
 
-    const teamJoinMatch = pathname.match(/^\/api\/teams\/(startup|sme|corporate)\/join$/);
-    if (teamJoinMatch && method === 'POST') {
-      const teamId = teamJoinMatch[1];
+    if (pathname === '/api/join' && method === 'POST') {
+      const current = await store.load();
+      const joined = joinByCode(current, body.code, body.deviceId);
+      await store.bindDeviceIfAvailable(
+        joined.teamId,
+        current.roomId,
+        current.teams[joined.teamId].accessCode,
+        body.deviceId,
+        joined.state.updatedAt
+      );
       const state = await store.load();
-      if (!validTeamToken(state, teamId, headers)) return { status: 401, body: { error: 'Invalid team access code' } };
-      const next = joinTeam(state, teamId, body.displayName);
-      await store.saveTeamIfAccess(teamId, next.teams[teamId], next.updatedAt, headers['x-team-token'], 'lobby');
-      return { status: 200, body: publicState(await store.load(), { teamId, teamToken: headers['x-team-token'] }) };
+      return {
+        status: 200,
+        body: {
+          teamId: joined.teamId,
+          state: publicState(state, { teamId: joined.teamId, deviceId: body.deviceId }),
+        },
+      };
     }
 
-    const submitMatch = pathname.match(/^\/api\/teams\/(startup|sme|corporate)\/submissions\/(1|2)$/);
+    const submitMatch = pathname.match(/^\/api\/teams\/(team-a|team-b|team-c)\/submissions\/(1|2)$/);
     if (submitMatch && method === 'POST') {
       const teamId = submitMatch[1];
       const round = Number(submitMatch[2]);
       const state = await store.load();
-      if (!validTeamToken(state, teamId, headers)) return { status: 401, body: { error: 'Invalid team access code' } };
+      const credentials = playerCredentials(headers);
+      if (credentials.teamId !== teamId || !validPlayer(state, credentials)) {
+        return { status: 401, body: { error: 'Invalid team credentials' } };
+      }
       const next = submitRound(state, teamId, round, body);
-      await store.saveTeamIfAccess(
+      await store.saveTeamIfDevice(
         teamId,
         next.teams[teamId],
         next.updatedAt,
-        headers['x-team-token'],
-        round === 1 ? 'round1' : 'round2'
+        state.roomId,
+        credentials.code,
+        credentials.deviceId,
+        `round${round}`
       );
-      return { status: 200, body: publicState(await store.load(), { teamId, teamToken: headers['x-team-token'] }) };
+      const saved = await store.load();
+      return { status: 200, body: publicState(saved, { teamId, deviceId: credentials.deviceId }) };
     }
 
     if (pathname.startsWith('/api/host/')) {
@@ -67,7 +96,12 @@ async function handleApiRequest({ method, pathname, headers = {}, body = {}, sto
       if (pathname === '/api/host/phase' && method === 'POST') {
         const current = await store.load();
         const next = transitionPhase(current, body.phase);
-        await store.transitionPhase(current.phase, current.roomId, next.phase, next.updatedAt);
+        await store.transitionPhase(current.phase, current.roomId, {
+          phase: next.phase,
+          phaseStartedAt: next.phaseStartedAt,
+          roundEndsAt: next.roundEndsAt,
+          updatedAt: next.updatedAt,
+        });
         return { status: 200, body: await store.load() };
       }
 

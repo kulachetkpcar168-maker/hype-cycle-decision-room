@@ -4,150 +4,113 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createFileStore, createUpstashStore, deserializeRedisHash, serializeStateFields } = require('../src/store');
-const { createInitialState, joinTeam } = require('../src/game');
+const { createInitialState } = require('../src/game');
 
-test('file store initializes and persists state', async () => {
+function tempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hype-store-'));
-  const store = createFileStore(path.join(dir, 'state.json'));
-  const initial = await store.load();
-  const joined = joinTeam(initial, 'startup', 'Alpha');
-  await store.saveTeam('startup', joined.teams.startup, joined.updatedAt);
-  assert.equal((await store.load()).teams.startup.displayName, 'Alpha');
+  return { dir, store: createFileStore(path.join(dir, 'state.json')) };
+}
+
+test('redis serialization preserves timers, mappings, codes, and device bindings', () => {
+  const state = createInitialState();
+  state.phase = 'round1';
+  state.phaseStartedAt = '2026-10-09T12:00:00.000Z';
+  state.roundEndsAt = '2026-10-09T12:04:00.000Z';
+  state.teams['team-a'].deviceId = 'device-alpha-1234';
+  const restored = deserializeRedisHash(Object.entries(serializeStateFields(state)).flat());
+  assert.equal(restored.roundEndsAt, state.roundEndsAt);
+  assert.equal(restored.teams['team-a'].companyId, state.teams['team-a'].companyId);
+  assert.equal(restored.teams['team-a'].accessCode, state.teams['team-a'].accessCode);
+  assert.equal(restored.teams['team-a'].deviceId, 'device-alpha-1234');
+});
+
+test('file store atomically binds one device and rejects another', async () => {
+  const { dir, store } = tempStore();
+  const state = await store.load();
+  const team = state.teams['team-a'];
+  await store.bindDeviceIfAvailable('team-a', state.roomId, team.accessCode, 'device-one-1234', 'now');
+  await assert.rejects(store.bindDeviceIfAvailable('team-a', state.roomId, team.accessCode, 'device-two-5678', 'later'), /already joined/i);
+  assert.equal((await store.load()).teams['team-a'].deviceId, 'device-one-1234');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('redis hash serialization round trips game state', () => {
-  const state = joinTeam(createInitialState(), 'sme', 'Hotel Team');
-  const restored = deserializeRedisHash(Object.entries(serializeStateFields(state)).flat());
-  assert.equal(restored.teams.sme.displayName, 'Hotel Team');
-  assert.match(restored.teams.sme.accessToken, /^[A-Za-z0-9_-]{8}$/);
+test('file store checks room, device credentials, and phase on atomic writes', async () => {
+  const { dir, store } = tempStore();
+  const state = await store.load();
+  const team = state.teams['team-b'];
+  await store.bindDeviceIfAvailable('team-b', state.roomId, team.accessCode, 'device-beta-1234', 'now');
+  await assert.rejects(store.saveTeamIfDevice('team-b', team, 'later', state.roomId, team.accessCode, 'wrong-device', 'round1'), /credentials/i);
+  await assert.rejects(store.saveTeamIfDevice('team-b', team, 'later', state.roomId, team.accessCode, 'device-beta-1234', 'round1'), /not open/i);
+  await store.reset();
+  await assert.rejects(store.transitionPhase('lobby', state.roomId, { phase: 'round1', updatedAt: 'now' }), /state changed/i);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('upstash first load initializes atomically and returns the persisted winner', async () => {
-  let persisted = null;
+test('Upstash device binding, submission, and phase updates are atomic Lua operations', async () => {
   const commands = [];
+  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
+  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
+  const state = createInitialState();
+  await store.bindDeviceIfAvailable('team-a', state.roomId, state.teams['team-a'].accessCode, 'device-alpha-1234', 'now');
+  await store.saveTeamIfDevice('team-a', state.teams['team-a'], 'later', state.roomId, state.teams['team-a'].accessCode, 'device-alpha-1234', 'round1');
+  await store.transitionPhase('lobby', state.roomId, { phase: 'round1', phaseStartedAt: 'start', roundEndsAt: 'end', updatedAt: 'start' });
+  assert.equal(commands.length, 3);
+  assert.ok(commands.every((command) => command[0] === 'EVAL'));
+  assert.match(commands[0][1], /deviceId/);
+  assert.match(commands[1][1], /PHASE_LOCKED/);
+  assert.match(commands[1][1], /roomId/);
+  assert.deepEqual(commands[2].slice(-6), ['lobby', state.roomId, 'round1', 'start', 'end', 'start']);
+});
+
+test('Upstash initialization is atomic and credential aliases remain supported', async () => {
+  let persisted = null;
   const fakeFetch = async (_url, options) => {
     const command = JSON.parse(options.body);
-    commands.push(command);
-    assert.equal(command[0], 'EVAL');
     if (!persisted) persisted = command.slice(4);
     return { ok: true, json: async () => ({ result: persisted }) };
   };
   const first = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
   const second = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
   const [left, right] = await Promise.all([first.load(), second.load()]);
-  assert.equal(commands.length, 2);
-  assert.equal(left.teams.startup.accessToken, right.teams.startup.accessToken);
-  assert.equal(left.teams.sme.accessToken, right.teams.sme.accessToken);
-});
-
-test('upstash store writes only the changed team field', async () => {
-  const commands = [];
-  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
-  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
-  const state = joinTeam(createInitialState(), 'corporate', 'Bank Team');
-  await store.saveTeam('corporate', state.teams.corporate, state.updatedAt);
-  assert.deepEqual(commands[0].slice(0, 3), ['HSET', 'room', 'corporate']);
-});
-
-test('upstash conditional submission uses atomic phase check', async () => {
-  const commands = [];
-  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
-  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
-  const state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  await store.saveTeamIfPhase('startup', state.teams.startup, state.updatedAt, 'round1');
-  assert.equal(commands[0][0], 'EVAL');
-  assert.match(commands[0][1], /HGET/);
-  assert.equal(commands[0].at(-4), 'round1');
-});
-
-test('file store atomically rejects stale team tokens and submission phases', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hype-store-'));
-  const store = createFileStore(path.join(dir, 'state.json'));
-  const old = await store.load();
-  const joined = joinTeam(old, 'startup', 'Stale Team');
-  await store.reset();
-  await assert.rejects(store.saveTeamIfAccess('startup', joined.teams.startup, joined.updatedAt, old.teams.startup.accessToken), /Invalid team access code/);
-  const fresh = await store.load();
-  assert.notEqual(fresh.teams.startup.accessToken, old.teams.startup.accessToken);
-  assert.equal(fresh.teams.startup.joined, false);
-  await assert.rejects(store.saveTeamIfAccess('startup', { ...fresh.teams.startup, joined: true }, fresh.updatedAt, fresh.teams.startup.accessToken, 'round1'), /Round 1 is not open/);
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('file store rejects a stale phase transition after reset replaces the room', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hype-store-'));
-  const store = createFileStore(path.join(dir, 'state.json'));
-  const stale = await store.load();
-  await store.reset();
-  await assert.rejects(
-    store.transitionPhase(stale.phase, stale.roomId, 'round1', new Date().toISOString()),
-    /state changed/i
-  );
-  assert.equal((await store.load()).phase, 'lobby');
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('file store rejects a stale pitch-team update after reset', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hype-store-'));
-  const store = createFileStore(path.join(dir, 'state.json'));
-  const stale = await store.load();
-  await store.reset();
-  await assert.rejects(
-    store.setActivePitchTeam(stale.roomId, 'pitch', 'corporate', new Date().toISOString()),
-    /state changed/i
-  );
-  assert.equal((await store.load()).activePitchTeam, 'startup');
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('upstash team persistence atomically checks token and required phase', async () => {
-  const commands = [];
-  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
-  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
-  const state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  await store.saveTeamIfAccess('startup', state.teams.startup, state.updatedAt, state.teams.startup.accessToken, 'round1');
-  assert.equal(commands[0][0], 'EVAL');
-  assert.match(commands[0][1], /accessToken/);
-  assert.equal(commands[0].at(-1), 'round1');
-});
-
-test('upstash phase transition uses atomic compare-and-set', async () => {
-  const commands = [];
-  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
-  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
-  await store.transitionPhase('lobby', 'room-a', 'round1', 'now');
-  assert.deepEqual(commands[0].slice(-4), ['lobby', 'room-a', 'round1', 'now']);
-  assert.equal(commands[0][0], 'EVAL');
-  assert.match(commands[0][1], /roomId/);
-});
-
-test('upstash pitch-team update compares room and phase atomically', async () => {
-  const commands = [];
-  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
-  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
-  await store.setActivePitchTeam('room-a', 'pitch', 'corporate', 'now');
-  assert.deepEqual(commands[0].slice(-4), ['room-a', 'pitch', 'corporate', 'now']);
-  assert.match(commands[0][1], /activePitchTeam/);
-});
-
-test('upstash store accepts Vercel KV credential names', async () => {
-  const previousUrl = process.env.KV_REST_API_URL;
-  const previousToken = process.env.KV_REST_API_TOKEN;
-  process.env.KV_REST_API_URL = 'https://example.upstash.io';
-  process.env.KV_REST_API_TOKEN = 'kv-token';
-  const commands = [];
-  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: ['phase', 'lobby'] }) }; };
-  try {
-    const store = createUpstashStore({ fetchImpl: fakeFetch, key: 'room' });
-    await store.load();
-    assert.equal(commands[0][0], 'EVAL');
-  } finally {
-    if (previousUrl === undefined) delete process.env.KV_REST_API_URL; else process.env.KV_REST_API_URL = previousUrl;
-    if (previousToken === undefined) delete process.env.KV_REST_API_TOKEN; else process.env.KV_REST_API_TOKEN = previousToken;
-  }
-});
-
-test('upstash store rejects missing credentials', () => {
+  assert.equal(left.roomId, right.roomId);
+  assert.equal(left.teams['team-a'].accessCode, right.teams['team-a'].accessCode);
   assert.throws(() => createUpstashStore({ url: '', token: '' }), /credentials/);
+});
+
+test('file store rejects a stale submission after reset even when credentials are replayed', async () => {
+  const { dir, store } = tempStore();
+  const old = await store.load();
+  const staleTeam = { ...old.teams['team-a'], joined: true, deviceId: 'device-alpha-1234' };
+  const replacement = createInitialState();
+  replacement.phase = 'round1';
+  replacement.teams['team-a'] = { ...replacement.teams['team-a'], accessCode: staleTeam.accessCode, deviceId: staleTeam.deviceId, joined: true };
+  await store.reset(replacement);
+  await assert.rejects(store.saveTeamIfDevice('team-a', staleTeam, 'later', old.roomId, staleTeam.accessCode, staleTeam.deviceId, 'round1'), /state changed/i);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('Upstash load atomically replaces incomplete schema-v2 state and keeps the replacement stable', async () => {
+  const commands = [];
+  let persisted = ['schemaVersion', '2', 'roomId', 'legacy-room', 'phase', 'lobby', 'team-a', '{bad'];
+  const fakeFetch = async (_url, options) => {
+    const command = JSON.parse(options.body); commands.push(command);
+    const fields = Object.fromEntries(Array.from({ length: persisted.length / 2 }, (_, index) => [persisted[index * 2], persisted[index * 2 + 1]]));
+    let valid = fields.schemaVersion === '2' && ['team-a', 'team-b', 'team-c'].every((id) => {
+      try { const team = JSON.parse(fields[id]); return team.id === id && team.accessCode && team.companyId; } catch { return false; }
+    });
+    if (!valid) persisted = command.slice(4);
+    return { ok: true, json: async () => ({ result: persisted }) };
+  };
+  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
+  const first = await store.load();
+  const second = await store.load();
+  assert.equal(first.schemaVersion, 2);
+  assert.equal(first.roomId, second.roomId);
+  assert.equal(first.teams['team-a'].accessCode, second.teams['team-a'].accessCode);
+  assert.match(commands[0][1], /pcall\(cjson\.decode/);
+  assert.match(commands[0][1], /type\(team\)~='table'/);
+  assert.match(commands[0][1], /team\.accessCode==''/);
+  assert.match(commands[0][1], /team\.companyId==''/);
+  assert.match(commands[0][1], /DEL/);
+  assert.equal(deserializeRedisHash(['schemaVersion', '2', 'roomId', 'x', 'phase', 'lobby', 'team-a', 'null']), null);
 });

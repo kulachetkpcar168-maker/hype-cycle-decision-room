@@ -2,127 +2,162 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  ACCESS_CODE_ALPHABET,
+  BASE_EVIDENCE_IDS,
+  COMPANY_IDS,
+  PHASES,
+  RISK_IDS,
+  TEAM_IDS,
   createInitialState,
-  joinTeam,
-  setActivePitchTeam,
-  transitionPhase,
-  submitRound,
+  joinByCode,
   publicState,
+  setActivePitchTeam,
+  submitRound,
+  transitionPhase,
 } = require('../src/game');
 
 const validRound1 = {
-  stage: 'peak', action: 'pilot',
-  evidence: ['company_volume', 'fast_resolution', 'company_reported'],
-  reason: 'ตัวเลขน่าสนใจ แต่ควรทดลองก่อนขยายเพราะเป็นข้อมูลจากบริษัท',
-  kpi: 'customer_satisfaction', confidence: 4,
+  stage: 'peak',
+  action: 'pilot',
+  mostInfluentialEvidence: 'fast_resolution',
+  mainRisk: 'service_quality',
 };
 
-test('initial state has three teams, tokens, and starts in lobby', () => {
+function joinedState(teamId = 'team-a', deviceId = 'device-alpha-1234') {
   const state = createInitialState();
+  return joinByCode(state, state.teams[teamId].accessCode, deviceId).state;
+}
+
+function advance(state, phases) {
+  return phases.reduce((next, phase) => transitionPhase(next, phase), state);
+}
+
+test('initial state uses exactly six approved phases and randomized one-to-one company assignment', () => {
+  const state = createInitialState();
+  assert.deepEqual(PHASES, ['lobby', 'round1', 'round2', 'reveal', 'pitch', 'takeaway']);
   assert.equal(state.phase, 'lobby');
-  assert.deepEqual(Object.keys(state.teams), ['startup', 'sme', 'corporate']);
-  assert.equal(state.teams.startup.round1, null);
-  assert.equal(state.teams.startup.round2, null);
-  assert.match(state.teams.startup.accessToken, /^[A-Za-z0-9_-]{8}$/);
-  assert.match(state.roomId, /^[A-Za-z0-9_-]{16}$/);
+  assert.deepEqual(Object.keys(state.teams), TEAM_IDS);
+  assert.deepEqual(new Set(TEAM_IDS.map((id) => state.teams[id].companyId)), new Set(COMPANY_IDS));
+  assert.equal(state.activePitchTeam, 'team-a');
 });
 
-test('host can follow the allowed phase sequence', () => {
-  let state = createInitialState();
-  state = transitionPhase(state, 'round1');
-  state = transitionPhase(state, 'round1_locked');
-  state = transitionPhase(state, 'twist');
-  assert.equal(state.phase, 'twist');
-});
-
-test('active pitch team can change only during pitch phase', () => {
-  assert.throws(() => setActivePitchTeam(createInitialState(), 'corporate'), /Pitch mode/i);
-  let state = createInitialState();
-  for (const phase of ['round1', 'round1_locked', 'twist', 'round2', 'round2_locked', 'pitch']) {
-    state = transitionPhase(state, phase);
+test('access codes are unique readable four-character uppercase codes', () => {
+  const state = createInitialState();
+  const codes = TEAM_IDS.map((id) => state.teams[id].accessCode);
+  assert.equal(new Set(codes).size, 3);
+  for (const code of codes) {
+    assert.match(code, /^[A-Z2-9]{4}$/);
+    assert.ok([...code].every((character) => ACCESS_CODE_ALPHABET.includes(character)));
+    assert.doesNotMatch(code, /[01ILO]/);
   }
-  state = setActivePitchTeam(state, 'corporate');
-  assert.equal(state.activePitchTeam, 'corporate');
 });
 
-test('host cannot skip phases', () => {
-  assert.throws(() => transitionPhase(createInitialState(), 'twist'), /Invalid phase transition/);
+test('joining by code maps the player to a server-assigned team and binds its device', () => {
+  const state = createInitialState();
+  const result = joinByCode(state, state.teams['team-b'].accessCode.toLowerCase(), 'device-beta-1234');
+  assert.equal(result.teamId, 'team-b');
+  assert.equal(result.state.teams['team-b'].joined, true);
+  assert.equal(result.state.teams['team-b'].deviceId, 'device-beta-1234');
 });
 
-test('phase transition cannot return to lobby', () => {
-  const state = transitionPhase(createInitialState(), 'round1');
+test('same device may rejoin but a different device cannot reuse a joined code', () => {
+  const state = createInitialState();
+  const code = state.teams['team-c'].accessCode;
+  const first = joinByCode(state, code, 'device-one-1234').state;
+  assert.doesNotThrow(() => joinByCode(first, code, 'device-one-1234'));
+  assert.throws(() => joinByCode(first, code, 'device-two-5678'), /already joined/i);
+});
+
+test('a previously bound device may refresh or rejoin after the lobby', () => {
+  let state = joinedState();
+  state = transitionPhase(state, 'round1');
+  assert.doesNotThrow(() => joinByCode(state, state.teams['team-a'].accessCode, 'device-alpha-1234'));
+});
+
+test('host follows the approved phase sequence and cannot skip or go backward', () => {
+  let state = createInitialState();
+  for (const phase of PHASES.slice(1)) state = transitionPhase(state, phase);
+  assert.equal(state.phase, 'takeaway');
+  assert.throws(() => transitionPhase(createInitialState(), 'round2'), /Invalid phase transition/);
   assert.throws(() => transitionPhase(state, 'lobby'), /Invalid phase transition/);
 });
 
-test('team can join only while the room is in lobby', () => {
-  const state = transitionPhase(createInitialState(), 'round1');
-  assert.throws(() => joinTeam(state, 'startup', 'Late Team'), /lobby/i);
+test('round phases receive synchronized four-minute deadlines while other phases do not', () => {
+  const start = new Date('2026-10-09T12:00:00.000Z');
+  let state = transitionPhase(createInitialState(), 'round1', start);
+  assert.equal(state.phaseStartedAt, start.toISOString());
+  assert.equal(state.roundEndsAt, '2026-10-09T12:04:00.000Z');
+  state = transitionPhase(state, 'round2', new Date('2026-10-09T12:05:00.000Z'));
+  assert.equal(state.roundEndsAt, '2026-10-09T12:09:00.000Z');
+  state = transitionPhase(state, 'reveal', new Date('2026-10-09T12:10:00.000Z'));
+  assert.equal(state.roundEndsAt, null);
 });
 
-test('team can submit and revise round one while open', () => {
-  let state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  state = transitionPhase(state, 'round1');
-  state = submitRound(state, 'startup', 1, validRound1);
-  assert.equal(state.teams.startup.round1.action, 'pilot');
-  state = submitRound(state, 'startup', 1, { ...validRound1, action: 'invest' });
-  assert.equal(state.teams.startup.round1.action, 'invest');
+test('timer expiry never locks a round or advances its phase', () => {
+  const state = transitionPhase(createInitialState(), 'round1', new Date('2000-01-01T00:00:00.000Z'));
+  assert.equal(state.phase, 'round1');
+  assert.equal(state.roundEndsAt, '2000-01-01T00:04:00.000Z');
 });
 
-test('round one submission is rejected after lock', () => {
-  let state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  state = transitionPhase(state, 'round1');
-  state = transitionPhase(state, 'round1_locked');
-  assert.throws(() => submitRound(state, 'startup', 1, validRound1), /Round 1 is not open/);
+test('submission accepts only the four approved fields and can be revised while round is open', () => {
+  let state = transitionPhase(joinedState(), 'round1');
+  state = submitRound(state, 'team-a', 1, validRound1);
+  assert.deepEqual(Object.keys(state.teams['team-a'].round1).sort(), ['action', 'mainRisk', 'mostInfluentialEvidence', 'stage', 'submittedAt'].sort());
+  state = submitRound(state, 'team-a', 1, { ...validRound1, action: 'invest' });
+  assert.equal(state.teams['team-a'].round1.action, 'invest');
+  assert.throws(() => submitRound(state, 'team-a', 1, { ...validRound1, reason: 'legacy' }), /Unknown submission field/);
 });
 
-test('submission requires exactly three distinct allowed evidence items', () => {
-  let state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  state = transitionPhase(state, 'round1');
-  assert.throws(() => submitRound(state, 'startup', 1, { ...validRound1, evidence: ['a', 'a', 'b'] }), /exactly 3 distinct evidence/);
-  assert.throws(() => submitRound(state, 'startup', 1, { ...validRound1, evidence: ['company_volume', 'fast_resolution', 'made_up'] }), /Unknown evidence/);
+test('submission requires exactly one approved influential evidence and one approved risk', () => {
+  const state = transitionPhase(joinedState(), 'round1');
+  assert.throws(() => submitRound(state, 'team-a', 1, { ...validRound1, mostInfluentialEvidence: ['fast_resolution'] }), /evidence/i);
+  assert.throws(() => submitRound(state, 'team-a', 1, { ...validRound1, mostInfluentialEvidence: 'human_choice' }), /evidence/i);
+  assert.throws(() => submitRound(state, 'team-a', 1, { ...validRound1, mainRisk: 'made_up' }), /risk/i);
+  assert.ok(BASE_EVIDENCE_IDS.includes(validRound1.mostInfluentialEvidence));
+  assert.ok(RISK_IDS.includes(validRound1.mainRisk));
 });
 
-test('submission rejects unknown properties instead of persisting arbitrary data', () => {
-  let state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  state = transitionPhase(state, 'round1');
-  assert.throws(
-    () => submitRound(state, 'startup', 1, { ...validRound1, arbitraryBlob: 'x'.repeat(1000) }),
-    /Unknown submission field/
-  );
+test('round two requires round one and may use new-information evidence', () => {
+  let missing = joinedState();
+  missing = advance(missing, ['round1', 'round2']);
+  assert.throws(() => submitRound(missing, 'team-a', 2, { ...validRound1, mostInfluentialEvidence: 'human_choice' }), /Round 1 answer/);
+
+  let state = transitionPhase(joinedState(), 'round1');
+  state = submitRound(state, 'team-a', 1, validRound1);
+  state = transitionPhase(state, 'round2');
+  state = submitRound(state, 'team-a', 2, { ...validRound1, action: 'wait', mostInfluentialEvidence: 'human_choice' });
+  assert.equal(state.teams['team-a'].round2.mostInfluentialEvidence, 'human_choice');
 });
 
-test('team must join before submitting and round two requires round one', () => {
-  const unjoined = transitionPhase(createInitialState(), 'round1');
-  assert.throws(() => submitRound(unjoined, 'startup', 1, validRound1), /join/i);
-
-  let state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  state = transitionPhase(state, 'round1');
-  for (const phase of ['round1_locked', 'twist', 'round2']) state = transitionPhase(state, phase);
-  assert.throws(() => submitRound(state, 'startup', 2, { ...validRound1, changedBy: 'ข้อมูลใหม่' }), /Round 1 answer/);
+test('active pitch team changes only during pitch', () => {
+  assert.throws(() => setActivePitchTeam(createInitialState(), 'team-c'), /Pitch mode/i);
+  const pitch = advance(createInitialState(), ['round1', 'round2', 'reveal', 'pitch']);
+  assert.equal(setActivePitchTeam(pitch, 'team-c').activePitchTeam, 'team-c');
 });
 
-test('round two requires changedBy explanation', () => {
-  let state = joinTeam(createInitialState(), 'sme', 'Hotel');
-  state = transitionPhase(state, 'round1');
-  state = submitRound(state, 'sme', 1, validRound1);
-  for (const phase of ['round1_locked', 'twist', 'round2']) state = transitionPhase(state, phase);
-  assert.throws(() => submitRound(state, 'sme', 2, validRound1), /changedBy/);
+test('public state hides codes, device identities, company mapping, and answers by default', () => {
+  const output = publicState(createInitialState());
+  assert.equal(output.teams['team-a'].accessCode, undefined);
+  assert.equal(output.teams['team-a'].deviceId, undefined);
+  assert.equal(output.teams['team-a'].companyId, undefined);
+  assert.equal(output.teams['team-a'].round1, undefined);
 });
 
-test('public state hides tokens and all team answers by default', () => {
-  const output = publicState({ ...createInitialState(), hostKey: 'secret', storagePath: '/tmp/x' });
-  assert.equal(output.hostKey, undefined);
-  assert.equal(output.storagePath, undefined);
-  assert.equal(output.teams.startup.accessToken, undefined);
-  assert.equal(output.teams.startup.round1, undefined);
+test('device-scoped state reveals only that team company and answers', () => {
+  let state = transitionPhase(joinedState(), 'round1');
+  state = submitRound(state, 'team-a', 1, validRound1);
+  const output = publicState(state, { teamId: 'team-a', deviceId: 'device-alpha-1234' });
+  assert.equal(output.teams['team-a'].round1.action, 'pilot');
+  assert.ok(COMPANY_IDS.includes(output.teams['team-a'].companyId));
+  assert.equal(output.teams['team-b'].companyId, undefined);
+  assert.equal(output.teams['team-b'].round1, undefined);
 });
 
-test('team-scoped public state reveals only its own answers', () => {
-  let state = joinTeam(createInitialState(), 'startup', 'Alpha');
-  state = transitionPhase(state, 'round1');
-  state = submitRound(state, 'startup', 1, validRound1);
-  const output = publicState(state, { teamId: 'startup', teamToken: state.teams.startup.accessToken });
-  assert.equal(output.teams.startup.round1.action, 'pilot');
-  assert.equal(output.teams.sme.round1, undefined);
-  assert.equal(output.teams.startup.accessToken, undefined);
+test('public pitch state reveals only the selected team company and decisions', () => {
+  let state = advance(createInitialState(), ['round1', 'round2', 'reveal', 'pitch']);
+  state = setActivePitchTeam(state, 'team-b');
+  const output = publicState(state);
+  assert.ok(COMPANY_IDS.includes(output.teams['team-b'].companyId));
+  assert.equal(output.teams['team-a'].companyId, undefined);
+  assert.equal(output.teams['team-c'].companyId, undefined);
 });

@@ -3,121 +3,23 @@ const app = document.querySelector('#host-app');
 const toast = document.querySelector('#toast');
 let state = null;
 let hostKey = sessionStorage.getItem('hype-host-key') || '';
-let timer = null;
-
-function esc(value = '') {
-  return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-}
-
-function notify(message) {
-  toast.textContent = message;
-  toast.classList.add('show');
-  clearTimeout(timer);
-  timer = setTimeout(() => toast.classList.remove('show'), 2400);
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { 'content-type': 'application/json', ...(hostKey ? { 'x-host-key': hostKey } : {}), ...(options.headers || {}) },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || 'เกิดข้อผิดพลาด');
-    error.status = response.status;
-    throw error;
-  }
-  return body;
-}
-
-function brand() {
-  return `<header class="host-header"><div class="brand" style="margin:0"><div class="brand-mark">H</div><div><h1>Facilitator Control</h1><p>Hype Cycle Decision Room</p></div></div>${state ? `<span class="pill"><span class="status-dot live"></span>${C.phases[state.phase]}</span>` : ''}</header>`;
-}
-
-function renderKeyPrompt() {
-  app.innerHTML = `${brand()}<section class="hero"><span class="eyebrow">Host access</span><h2>ใส่ Host Key</h2><p>Key ใช้เฉพาะทีมผู้นำเสนอเพื่อควบคุม Phase และล็อกคำตอบของผู้เล่น</p><form id="key-form"><div class="field"><label for="key">Host Key</label><input id="key" class="input" type="password" required placeholder="HOST_KEY"></div><button class="btn btn-primary">เปิด Control Panel</button></form></section>`;
-  document.querySelector('#key-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    hostKey = document.querySelector('#key').value;
-    sessionStorage.setItem('hype-host-key', hostKey);
-    refresh(true);
-  });
-}
-
-function teamStatus(teamId) {
-  const team = state.teams[teamId];
-  const meta = C.teams[teamId];
-  const current = state.phase === 'round1' || state.phase === 'round1_locked' || state.phase === 'twist' ? team.round1 : team.round2;
-  return `<div class="team-status-row"><div><strong style="color:${meta.color}">${meta.label}</strong><div class="muted">${esc(team.displayName || 'ยังไม่เข้าร่วม')}</div><div class="pill" style="margin-top:7px">Code: <strong>${esc(team.accessToken)}</strong></div></div><span class="pill"><span class="status-dot ${team.joined ? 'live' : ''}"></span>${team.joined ? 'Joined' : 'Waiting'}</span><div class="mini-result">${current ? 'ส่งแล้ว' : 'ยังไม่ส่ง'}</div></div>`;
-}
-
-function nextPhase() {
-  const index = C.phaseOrder.indexOf(state.phase);
-  return index < C.phaseOrder.length - 1 ? C.phaseOrder[index + 1] : null;
-}
-
-function resultCard(teamId) {
-  const team = state.teams[teamId];
-  const meta = C.teams[teamId];
-  const phaseIndex = C.phaseOrder.indexOf(state.phase);
-  const showRound1 = phaseIndex >= C.phaseOrder.indexOf('round1_locked');
-  const showRound2 = phaseIndex >= C.phaseOrder.indexOf('round2_locked');
-  const summary = (decision, visible) => visible && decision ? `${C.stageShort[decision.stage]} · ${C.actions[decision.action]} · ${decision.confidence}/5` : visible ? '—' : 'ซ่อนจนกว่าจะ Lock';
-  const reason = (decision, visible) => visible ? esc(decision?.reason || 'ยังไม่มีคำตอบ') : 'ป้องกันการเห็นคำตอบก่อนจบรอบ';
-  return `<article class="card"><span class="eyebrow" style="color:${meta.color}">${meta.label}</span><h3>${esc(team.displayName || meta.title)}</h3><div class="result-row"><div class="result-box"><small class="muted">Round 1</small><h3>${summary(team.round1, showRound1)}</h3><p>${reason(team.round1, showRound1)}</p></div><div class="arrow">→</div><div class="result-box"><small class="muted">Final</small><h3>${summary(team.round2, showRound2)}</h3><p>${reason(team.round2, showRound2)}</p></div></div></article>`;
-}
-
-function renderDashboard() {
-  const next = nextPhase();
-  const joinUrl = `${location.origin}/`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=380x380&data=${encodeURIComponent(joinUrl)}`;
-  app.innerHTML = `${brand()}<div class="host-grid"><section class="grid"><div class="card"><div class="section-title"><h3>Team status</h3><span class="muted">Auto refresh</span></div><div class="team-status">${Object.keys(C.teams).map(teamStatus).join('')}</div></div><div class="grid grid-3">${Object.keys(C.teams).map(resultCard).join('')}</div></section><aside class="grid"><section class="card"><span class="eyebrow">Join link</span><h3>เปิดบนมือถือ 3 ทีม</h3><img class="qr" src="${qrUrl}" alt="QR code สำหรับเข้าเกม"><div class="field"><input class="input" readonly value="${esc(joinUrl)}"></div><button id="copy-url" class="btn btn-secondary">คัดลอกลิงก์</button></section><section class="card"><span class="eyebrow">Phase control</span><h3>${C.phases[state.phase]}</h3><div class="phase-control">${next ? `<button id="next-phase" class="btn btn-primary">ไปขั้นต่อไป: ${C.phases[next]}</button>` : '<p class="muted">จบกิจกรรมแล้ว</p>'}${state.phase === 'pitch' ? Object.entries(C.teams).map(([id, team]) => `<button class="btn ${state.activePitchTeam === id ? 'btn-primary' : 'btn-secondary'} pitch-team" data-team="${id}">เปิด Pitch: ${team.label}</button>`).join('') : ''}<button id="reset" class="btn btn-danger">Reset เกม</button><button id="change-key" class="btn btn-secondary">เปลี่ยน Host Key</button></div></section></aside></div>`;
-  document.querySelector('#copy-url').addEventListener('click', async () => { await navigator.clipboard.writeText(joinUrl); notify('คัดลอกลิงก์แล้ว'); });
-  if (next) document.querySelector('#next-phase').addEventListener('click', () => changePhase(next));
-  document.querySelector('#reset').addEventListener('click', resetGame);
-  document.querySelector('#change-key').addEventListener('click', () => { sessionStorage.removeItem('hype-host-key'); hostKey = ''; renderKeyPrompt(); });
-  document.querySelectorAll('.pitch-team').forEach((button) => button.addEventListener('click', () => selectPitch(button.dataset.team)));
-}
-
-async function changePhase(phase) {
-  try {
-    state = await api('/api/host/phase', { method: 'POST', body: JSON.stringify({ phase }) });
-    renderDashboard();
-  } catch (error) { notify(error.message); if (error.message.includes('key')) renderKeyPrompt(); }
-}
-
-async function selectPitch(teamId) {
-  try {
-    state = await api('/api/host/pitch-team', { method: 'POST', body: JSON.stringify({ teamId }) });
-    renderDashboard();
-  } catch (error) { notify(error.message); }
-}
-
-async function resetGame() {
-  if (!confirm('ล้างคำตอบทุกทีมและกลับไป Lobby?')) return;
-  try {
-    state = await api('/api/host/reset', { method: 'POST', body: '{}' });
-    renderDashboard();
-  } catch (error) { notify(error.message); }
-}
-
-async function refresh(force = false) {
-  if (!hostKey) return renderKeyPrompt();
-  try {
-    const next = await api('/api/host/state');
-    const changed = force || JSON.stringify(next) !== JSON.stringify(state);
-    state = next;
-    if (changed) renderDashboard();
-  } catch (error) {
-    notify(error.message);
-    if (error.status === 401) {
-      sessionStorage.removeItem('hype-host-key');
-      hostKey = '';
-      state = null;
-      renderKeyPrompt();
-    }
-  }
-}
-
-refresh(true);
-setInterval(() => refresh(false), 1500);
+let toastTimer;
+let banner = '';
+const labels = { 'team-a': 'Team A', 'team-b': 'Team B', 'team-c': 'Team C' };
+function esc(value = '') { return String(value).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
+function notify(message) { toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 3000); }
+async function api(path, options = {}) { const response = await fetch(path, { ...options, headers: { 'content-type': 'application/json', ...(hostKey ? { 'x-host-key': hostKey } : {}), ...(options.headers || {}) } }); const body = await response.json().catch(() => ({})); if (!response.ok) { const error = new Error(body.error || 'เกิดข้อผิดพลาด'); error.status = response.status; throw error; } return body; }
+function brand() { return `<header class="host-header"><div class="brand"><div class="brand-mark">H</div><div><h1>Facilitator Control</h1><p>Hype Cycle Decision Room</p></div></div>${state ? `<span class="pill">${C.phases[state.phase]}</span>` : ''}</header>`; }
+function promptKey() { app.innerHTML = `${brand()}<section class="hero"><h2>ใส่ Host Key</h2><form id="key-form"><input id="key" class="input" type="password" required><button class="btn btn-primary">เปิด Dashboard</button></form></section>`; document.querySelector('#key-form').addEventListener('submit', (event) => { event.preventDefault(); hostKey = document.querySelector('#key').value; sessionStorage.setItem('hype-host-key', hostKey); refresh(true); }); }
+function timerHtml() { return ['round1', 'round2'].includes(state.phase) ? `<div id="round-timer" class="timer" data-end="${state.roundEndsAt}">04:00</div>` : ''; }
+function updateTimer() { const node = document.querySelector('#round-timer'); if (!node) return; const seconds = Math.max(0, Math.ceil((new Date(node.dataset.end) - Date.now()) / 1000)); node.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; node.classList.toggle('warning', seconds <= 30); }
+function decision(decision) { return decision ? `${C.stageShort[decision.stage]} · ${C.actions[decision.action]}` : '—'; }
+function teamRow(id) { const team = state.teams[id]; const current = state.phase === 'round1' ? team.round1 : team.round2; return `<div class="team-status-row"><div><strong>${labels[id]}</strong><div class="access-code">${esc(team.accessCode)}</div></div><span class="pill"><span class="status-dot ${team.joined ? 'live' : ''}"></span>${team.joined ? 'Joined' : 'Waiting'}</span><span class="muted">${current ? 'ส่งแล้ว' : 'ยังไม่ส่ง'}</span></div>`; }
+function revealGrid() { return `<section class="grid grid-3">${Object.keys(labels).map((id) => { const team = state.teams[id]; const latest = team.round2 || team.round1; const evidence = latest ? [...C.evidence, ...C.newEvidence].find((item) => item.id === latest.mostInfluentialEvidence)?.title : ''; return `<article class="card"><span class="eyebrow">${labels[id]} · context still hidden</span><div class="result-row"><div class="result-box"><small>Before</small><h3>${decision(team.round1)}</h3></div><strong>→</strong><div class="result-box"><small>After</small><h3>${decision(team.round2)}</h3></div></div><p><strong>Key evidence:</strong> ${esc(evidence || '—')}</p><p><strong>Main risk:</strong> ${latest ? C.risks[latest.mainRisk] : '—'}</p></article>`; }).join('')}</section>`; }
+function pitchCard() { const id = state.activePitchTeam; const team = state.teams[id]; const company = C.companies[team.companyId]; const latest = team.round2 || team.round1; return `<section class="hero"><span class="eyebrow">${labels[id]} · company revealed for this pitch</span><h2 style="color:${company.color}">${company.title}</h2><p>${company.operation}</p><div class="result-row"><div class="result-box"><small>Before</small><h3>${decision(team.round1)}</h3></div><strong>→</strong><div class="result-box"><small>After</small><h3>${decision(team.round2)}</h3></div></div><div class="grid grid-2"><div class="callout"><strong>Influential evidence</strong><br>${latest ? esc([...C.evidence, ...C.newEvidence].find((x) => x.id === latest.mostInfluentialEvidence)?.title || '—') : '—'}</div><div class="callout"><strong>Main risk</strong><br>${latest ? C.risks[latest.mainRisk] : '—'}</div></div><section class="card"><h3>Speaking guide</h3><p>1. Our context is… 2. Before, we chose… 3. New information changed/reinforced… 4. Our action is… 5. The main risk is…</p></section></section>`; }
+function render() { const nextIndex = C.phaseOrder.indexOf(state.phase) + 1; const next = C.phaseOrder[nextIndex]; const joinUrl = `${location.origin}/`; const qr = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(joinUrl)}`; app.innerHTML = `${brand()}${banner ? `<div class="banner">${banner}</div>` : ''}<section class="phase-hero"><div><span class="eyebrow">Current phase</span><h2>${C.phases[state.phase]}</h2></div>${timerHtml()}</section>${state.phase === 'reveal' ? revealGrid() : ''}${state.phase === 'pitch' ? pitchCard() : ''}${state.phase === 'takeaway' ? `<section class="hero"><h2>${C.takeaway}</h2><p>${C.principle}</p></section>` : ''}<div class="host-layout"><main class="grid"><section class="card"><div class="section-title"><h2>Team status</h2><span class="muted">Company hidden until selected pitch</span></div><div class="team-status">${Object.keys(labels).map(teamRow).join('')}</div></section></main><aside class="grid"><section class="card"><h3>Join</h3><img class="qr" src="${qr}" alt="Join QR"><p>${esc(joinUrl)}</p></section><section class="card"><h3>Phase control</h3><div class="grid">${next ? `<button id="next" class="btn btn-primary">Next: ${C.phases[next]}</button>` : '<p>Activity complete</p>'}${state.phase === 'pitch' ? Object.entries(labels).map(([id, label]) => `<button class="btn ${state.activePitchTeam === id ? 'btn-primary' : 'btn-secondary'} pitch" data-id="${id}">Show ${label}</button>`).join('') : ''}<button id="reset" class="btn btn-danger">Reset room</button></div></section></aside></div>`; if (next) document.querySelector('#next').addEventListener('click', () => changePhase(next)); document.querySelector('#reset').addEventListener('click', reset); document.querySelectorAll('.pitch').forEach((button) => button.addEventListener('click', () => selectPitch(button.dataset.id))); updateTimer(); }
+async function changePhase(phase) { try { state = await api('/api/host/phase', { method: 'POST', body: JSON.stringify({ phase }) }); banner = `เปลี่ยน Phase แล้ว: ${C.phases[phase]}`; notify(banner); render(); } catch (error) { notify(error.message); } }
+async function selectPitch(teamId) { try { state = await api('/api/host/pitch-team', { method: 'POST', body: JSON.stringify({ teamId }) }); banner = `กำลังแสดง ${labels[teamId]}`; notify(banner); render(); } catch (error) { notify(error.message); } }
+async function reset() { if (!confirm('Reset room, codes, assignments, and answers?')) return; try { state = await api('/api/host/reset', { method: 'POST', body: '{}' }); banner = 'Reset แล้ว — สร้างรหัสและการจับคู่บริษัทใหม่'; notify(banner); render(); } catch (error) { notify(error.message); } }
+async function refresh(force = false) { if (!hostKey) return promptKey(); try { const next = await api('/api/host/state'); const changed = force || JSON.stringify(next) !== JSON.stringify(state); state = next; if (changed) render(); updateTimer(); } catch (error) { notify(error.message); if (error.status === 401) { hostKey = ''; sessionStorage.removeItem('hype-host-key'); promptKey(); } } }
+refresh(true); setInterval(() => refresh(false), 1500); setInterval(updateTimer, 250);
