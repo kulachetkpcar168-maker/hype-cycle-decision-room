@@ -55,6 +55,13 @@ test('host presentation teaches all phases and shows join codes during the lobby
   for (const token of ['hostHypeGraph', 'host-hype-map', 'Innovation Trigger', 'Peak', 'Trough', 'Slope', 'Plateau', 'Evidence → Stage → Action']) assert.ok(host.includes(token), token);
 });
 
+test('host loads the key-form polling gate before dashboard code', () => {
+  const html = read('public/host.html');
+  assert.match(html, /host-key-gate\.js/);
+  assert.ok(html.indexOf('/host-key-gate.js') < html.indexOf('/host.js'));
+  assert.match(read('public/host.js'), /HostKeyGate/);
+});
+
 test('content is Thai-first, uses unnamed simulated contexts, and labels provenance', () => {
   const common = read('public/common.js');
   for (const field of ['operation', 'customerVolume', 'staffingWorkflow', 'constraints', 'riskTolerance', 'decisionQuestion']) assert.match(common, new RegExp(field));
