@@ -123,8 +123,8 @@ function createFileStore(storagePath) {
 }
 
 function createUpstashStore(options = {}) {
-  const url = options.url || process.env.UPSTASH_REDIS_REST_URL;
-  const token = options.token || process.env.UPSTASH_REDIS_REST_TOKEN;
+  const url = options.url || process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = options.token || process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const key = options.key || process.env.GAME_STATE_KEY || 'hype-cycle:decision-room';
   if (!url || !token) throw new Error('Missing Upstash Redis credentials');

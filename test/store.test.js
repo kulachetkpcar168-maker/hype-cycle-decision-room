@@ -131,6 +131,23 @@ test('upstash pitch-team update compares room and phase atomically', async () =>
   assert.match(commands[0][1], /activePitchTeam/);
 });
 
+test('upstash store accepts Vercel KV credential names', async () => {
+  const previousUrl = process.env.KV_REST_API_URL;
+  const previousToken = process.env.KV_REST_API_TOKEN;
+  process.env.KV_REST_API_URL = 'https://example.upstash.io';
+  process.env.KV_REST_API_TOKEN = 'kv-token';
+  const commands = [];
+  const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: ['phase', 'lobby'] }) }; };
+  try {
+    const store = createUpstashStore({ fetchImpl: fakeFetch, key: 'room' });
+    await store.load();
+    assert.equal(commands[0][0], 'EVAL');
+  } finally {
+    if (previousUrl === undefined) delete process.env.KV_REST_API_URL; else process.env.KV_REST_API_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.KV_REST_API_TOKEN; else process.env.KV_REST_API_TOKEN = previousToken;
+  }
+});
+
 test('upstash store rejects missing credentials', () => {
   assert.throws(() => createUpstashStore({ url: '', token: '' }), /credentials/);
 });
