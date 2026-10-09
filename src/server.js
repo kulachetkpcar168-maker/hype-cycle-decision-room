@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { handleApiRequest } = require('./api');
 const { createFileStore } = require('./store');
+const { createRequestPolicy } = require('./request-policy');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public');
@@ -33,30 +34,20 @@ function contentType(filePath) {
   return { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' }[path.extname(filePath)] || 'application/octet-stream';
 }
 
-function createRateLimiter(limit = 180, windowMs = 60_000) {
-  const clients = new Map();
-  return (key) => {
-    const now = Date.now();
-    const record = clients.get(key);
-    if (!record || now - record.startedAt >= windowMs) { clients.set(key, { count: 1, startedAt: now }); return true; }
-    record.count += 1;
-    return record.count <= limit;
-  };
-}
-
 function createAppServer(options = {}) {
   const storagePath = options.storagePath || process.env.STATE_FILE || path.join(PROJECT_ROOT, 'data', 'state.json');
   const hostKey = options.hostKey || process.env.HOST_KEY;
   if (!hostKey) throw new Error('HOST_KEY is required');
   const store = options.store || createFileStore(storagePath);
-  const allowRequest = createRateLimiter(options.rateLimit || 180);
+  const policy = createRequestPolicy({ store, hostKey, readLimit: options.readRateLimit, writeLimit: options.writeRateLimit });
 
   return http.createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url, 'http://localhost').pathname;
       if (pathname.startsWith('/api/')) {
         const client = request.socket.remoteAddress || 'unknown';
-        if (!allowRequest(client)) return sendJson(response, 429, { error: 'Too many requests' });
+        const check = await policy.check({ method: request.method, pathname, headers: request.headers, client });
+        if (!check.allowed) return sendJson(response, 429, { error: 'Too many requests' });
         const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readJsonBody(request) : {};
         const result = await handleApiRequest({ method: request.method, pathname, headers: request.headers, body, store, hostKey });
         return sendJson(response, result.status, result.body);
@@ -82,4 +73,4 @@ if (require.main === module) {
   createAppServer().listen(port, host, () => console.log(`Hype Cycle Decision Room running at http://${host}:${port}`));
 }
 
-module.exports = { createAppServer, createRateLimiter };
+module.exports = { createAppServer };

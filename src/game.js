@@ -105,12 +105,12 @@ function joinByCode(state, code, deviceId, teamName, updateTeamName = false) {
   if (!teamId) throw new Error('Invalid team access code');
   const team = state.teams[teamId];
   if (team.deviceId && team.deviceId !== normalizedDevice) throw new Error('This team code is already joined on another device');
-  if (!team.deviceId && state.phase !== 'lobby') throw new Error('New teams can join only during lobby');
-  const normalizedName = team.deviceId && !updateTeamName ? team.teamName : normalizeTeamName(teamName);
+  if (!team.deviceId && !team.joined && state.phase !== 'lobby') throw new Error('New teams can join only during lobby');
+  const normalizedName = team.joined && (!updateTeamName || state.phase !== 'lobby') ? team.teamName : normalizeTeamName(teamName);
   const next = clone(state);
   next.teams[teamId].joined = true;
   next.teams[teamId].deviceId = normalizedDevice;
-  if (!team.deviceId || (state.phase === 'lobby' && updateTeamName)) next.teams[teamId].teamName = normalizedName;
+  if (!team.joined || (state.phase === 'lobby' && updateTeamName)) next.teams[teamId].teamName = normalizedName;
   next.updatedAt = new Date().toISOString();
   return { state: next, teamId };
 }
