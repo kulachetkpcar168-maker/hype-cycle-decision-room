@@ -21,7 +21,7 @@ test('end-to-end player joins by code and submits the simplified decision', asyn
     const teamId = 'team-a';
     const code = host.teams[teamId].accessCode;
     const deviceId = 'device-browser-1234';
-    const join = await fetch(`${base}/api/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceId }) });
+    const join = await fetch(`${base}/api/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceId, teamName: 'ทีม Browser' }) });
     assert.equal(join.status, 200);
     assert.equal((await join.json()).teamId, teamId);
     await fetch(`${base}/api/host/phase`, { method: 'POST', headers: hostHeaders, body: JSON.stringify({ phase: 'round1' }) });

@@ -11,26 +11,29 @@ function tempStore() {
   return { dir, store: createFileStore(path.join(dir, 'state.json')) };
 }
 
-test('redis serialization preserves timers, mappings, codes, and device bindings', () => {
+test('redis serialization preserves timers, mappings, codes, device bindings, and team names', () => {
   const state = createInitialState();
   state.phase = 'round1';
   state.phaseStartedAt = '2026-10-09T12:00:00.000Z';
   state.roundEndsAt = '2026-10-09T12:04:00.000Z';
   state.teams['team-a'].deviceId = 'device-alpha-1234';
+  state.teams['team-a'].teamName = 'ทีมอัลฟา';
   const restored = deserializeRedisHash(Object.entries(serializeStateFields(state)).flat());
   assert.equal(restored.roundEndsAt, state.roundEndsAt);
   assert.equal(restored.teams['team-a'].companyId, state.teams['team-a'].companyId);
   assert.equal(restored.teams['team-a'].accessCode, state.teams['team-a'].accessCode);
   assert.equal(restored.teams['team-a'].deviceId, 'device-alpha-1234');
+  assert.equal(restored.teams['team-a'].teamName, 'ทีมอัลฟา');
 });
 
 test('file store atomically binds one device and rejects another', async () => {
   const { dir, store } = tempStore();
   const state = await store.load();
   const team = state.teams['team-a'];
-  await store.bindDeviceIfAvailable('team-a', state.roomId, team.accessCode, 'device-one-1234', 'now');
-  await assert.rejects(store.bindDeviceIfAvailable('team-a', state.roomId, team.accessCode, 'device-two-5678', 'later'), /already joined/i);
+  await store.bindDeviceIfAvailable('team-a', state.roomId, team.accessCode, 'device-one-1234', 'ทีมหนึ่ง', false, 'now');
+  await assert.rejects(store.bindDeviceIfAvailable('team-a', state.roomId, team.accessCode, 'device-two-5678', 'ทีมสอง', false, 'later'), /already joined/i);
   assert.equal((await store.load()).teams['team-a'].deviceId, 'device-one-1234');
+  assert.equal((await store.load()).teams['team-a'].teamName, 'ทีมหนึ่ง');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -38,7 +41,7 @@ test('file store checks room, device credentials, and phase on atomic writes', a
   const { dir, store } = tempStore();
   const state = await store.load();
   const team = state.teams['team-b'];
-  await store.bindDeviceIfAvailable('team-b', state.roomId, team.accessCode, 'device-beta-1234', 'now');
+  await store.bindDeviceIfAvailable('team-b', state.roomId, team.accessCode, 'device-beta-1234', 'ทีมเบต้า', false, 'now');
   await assert.rejects(store.saveTeamIfDevice('team-b', team, 'later', state.roomId, team.accessCode, 'wrong-device', 'round1'), /credentials/i);
   await assert.rejects(store.saveTeamIfDevice('team-b', team, 'later', state.roomId, team.accessCode, 'device-beta-1234', 'round1'), /not open/i);
   await store.reset();
@@ -51,12 +54,13 @@ test('Upstash device binding, submission, and phase updates are atomic Lua opera
   const fakeFetch = async (_url, options) => { commands.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ result: 1 }) }; };
   const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
   const state = createInitialState();
-  await store.bindDeviceIfAvailable('team-a', state.roomId, state.teams['team-a'].accessCode, 'device-alpha-1234', 'now');
+  await store.bindDeviceIfAvailable('team-a', state.roomId, state.teams['team-a'].accessCode, 'device-alpha-1234', 'ทีมอัลฟา', false, 'now');
   await store.saveTeamIfDevice('team-a', state.teams['team-a'], 'later', state.roomId, state.teams['team-a'].accessCode, 'device-alpha-1234', 'round1');
   await store.transitionPhase('lobby', state.roomId, { phase: 'round1', phaseStartedAt: 'start', roundEndsAt: 'end', updatedAt: 'start' });
   assert.equal(commands.length, 3);
   assert.ok(commands.every((command) => command[0] === 'EVAL'));
   assert.match(commands[0][1], /deviceId/);
+  assert.match(commands[0][1], /teamName/);
   assert.match(commands[1][1], /PHASE_LOCKED/);
   assert.match(commands[1][1], /roomId/);
   assert.deepEqual(commands[2].slice(-6), ['lobby', state.roomId, 'round1', 'start', 'end', 'start']);
@@ -89,13 +93,13 @@ test('file store rejects a stale submission after reset even when credentials ar
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('Upstash load atomically replaces incomplete schema-v2 state and keeps the replacement stable', async () => {
+test('Upstash load atomically migrates incomplete or older schema state and keeps the replacement stable', async () => {
   const commands = [];
   let persisted = ['schemaVersion', '2', 'roomId', 'legacy-room', 'phase', 'lobby', 'team-a', '{bad'];
   const fakeFetch = async (_url, options) => {
     const command = JSON.parse(options.body); commands.push(command);
     const fields = Object.fromEntries(Array.from({ length: persisted.length / 2 }, (_, index) => [persisted[index * 2], persisted[index * 2 + 1]]));
-    let valid = fields.schemaVersion === '2' && ['team-a', 'team-b', 'team-c'].every((id) => {
+    let valid = fields.schemaVersion === '3' && ['team-a', 'team-b', 'team-c'].every((id) => {
       try { const team = JSON.parse(fields[id]); return team.id === id && team.accessCode && team.companyId; } catch { return false; }
     });
     if (!valid) persisted = command.slice(4);
@@ -104,7 +108,7 @@ test('Upstash load atomically replaces incomplete schema-v2 state and keeps the 
   const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
   const first = await store.load();
   const second = await store.load();
-  assert.equal(first.schemaVersion, 2);
+  assert.equal(first.schemaVersion, 3);
   assert.equal(first.roomId, second.roomId);
   assert.equal(first.teams['team-a'].accessCode, second.teams['team-a'].accessCode);
   assert.match(commands[0][1], /pcall\(cjson\.decode/);

@@ -4,7 +4,7 @@ const { createInitialState, TEAM_IDS } = require('./game');
 
 function serializeStateFields(state) {
   return {
-    schemaVersion: String(state.schemaVersion || 2),
+    schemaVersion: String(state.schemaVersion || 3),
     roomId: state.roomId,
     phase: state.phase,
     phaseStartedAt: state.phaseStartedAt || '',
@@ -19,20 +19,20 @@ function deserializeRedisHash(value) {
   const fields = Array.isArray(value)
     ? Object.fromEntries(Array.from({ length: value.length / 2 }, (_, index) => [value[index * 2], value[index * 2 + 1]]))
     : (value || {});
-  if (fields.schemaVersion !== '2' || !fields.roomId || !fields.phase) return null;
+  if (fields.schemaVersion !== '3' || !fields.roomId || !fields.phase) return null;
   const teams = {};
   for (const id of TEAM_IDS) {
     if (!fields[id]) return null;
     try {
       const team = JSON.parse(fields[id]);
-      if (!team || team.id !== id || !team.accessCode || !team.companyId) return null;
+      if (!team || team.id !== id || !team.accessCode || !team.companyId || !Object.hasOwn(team, 'teamName')) return null;
       teams[id] = team;
     } catch {
       return null;
     }
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     roomId: fields.roomId,
     phase: fields.phase,
     phaseStartedAt: fields.phaseStartedAt || null,
@@ -48,7 +48,7 @@ function phaseError(requiredPhase) {
 }
 
 function validPersistedState(value) {
-  return value?.schemaVersion === 2 && TEAM_IDS.every((id) => value.teams?.[id]?.accessCode && value.teams[id].companyId);
+  return value?.schemaVersion === 3 && TEAM_IDS.every((id) => value.teams?.[id]?.accessCode && value.teams[id].companyId && Object.hasOwn(value.teams[id], 'teamName'));
 }
 
 function createFileStore(storagePath) {
@@ -77,13 +77,14 @@ function createFileStore(storagePath) {
     async saveTeam(teamId, team, updatedAt) {
       const next = read(); next.teams[teamId] = structuredClone(team); next.updatedAt = updatedAt; write(next);
     },
-    async bindDeviceIfAvailable(teamId, expectedRoomId, expectedCode, deviceId, updatedAt) {
+    async bindDeviceIfAvailable(teamId, expectedRoomId, expectedCode, deviceId, teamName, updateTeamName, updatedAt) {
       const next = read();
       const team = next.teams[teamId];
       if (next.roomId !== expectedRoomId) throw new Error('Game state changed; refresh and retry');
       if (!team || team.accessCode !== expectedCode) throw new Error('Invalid team access code');
       if (team.deviceId && team.deviceId !== deviceId) throw new Error('This team code is already joined on another device');
       if (!team.deviceId && next.phase !== 'lobby') throw new Error('New teams can join only during lobby');
+      if (!team.deviceId || (next.phase === 'lobby' && updateTeamName)) team.teamName = teamName;
       team.deviceId = deviceId; team.joined = true; next.updatedAt = updatedAt; write(next);
     },
     async saveTeamIfDevice(teamId, team, updatedAt, expectedRoomId, expectedCode, expectedDeviceId, requiredPhase) {
@@ -135,14 +136,14 @@ function createUpstashStore(options = {}) {
     async load() {
       const initial = createInitialState();
       const fields = Object.entries(serializeStateFields(initial)).flat();
-      const script = "local valid=redis.call('EXISTS',KEYS[1])==1 and redis.call('HGET',KEYS[1],'schemaVersion')==ARGV[2]; local ids={'team-a','team-b','team-c'}; if valid then for _,id in ipairs(ids) do local raw=redis.call('HGET',KEYS[1],id); if not raw then valid=false; break end; local ok,team=pcall(cjson.decode,raw); if not ok or type(team)~='table' or type(team.id)~='string' or team.id~=id or type(team.accessCode)~='string' or team.accessCode=='' or type(team.companyId)~='string' or team.companyId=='' then valid=false; break end end end; if not valid then redis.call('DEL',KEYS[1]); redis.call('HSET',KEYS[1],unpack(ARGV)) end; return redis.call('HGETALL',KEYS[1])";
+      const script = "local valid=redis.call('EXISTS',KEYS[1])==1 and redis.call('HGET',KEYS[1],'schemaVersion')==ARGV[2]; local ids={'team-a','team-b','team-c'}; if valid then for _,id in ipairs(ids) do local raw=redis.call('HGET',KEYS[1],id); if not raw then valid=false; break end; local ok,team=pcall(cjson.decode,raw); if not ok or type(team)~='table' or type(team.id)~='string' or team.id~=id or type(team.accessCode)~='string' or team.accessCode=='' or type(team.companyId)~='string' or team.companyId=='' or team.teamName==nil then valid=false; break end end end; if not valid then redis.call('DEL',KEYS[1]); redis.call('HSET',KEYS[1],unpack(ARGV)) end; return redis.call('HGETALL',KEYS[1])";
       const state = deserializeRedisHash(await command(['EVAL', script, '1', key, ...fields]));
       return validPersistedState(state) ? state : initial;
     },
     async saveTeam(teamId, team, updatedAt) { await command(['HSET', key, teamId, JSON.stringify(team), 'updatedAt', updatedAt]); },
-    async bindDeviceIfAvailable(teamId, expectedRoomId, expectedCode, deviceId, updatedAt) {
-      const script = "if redis.call('HGET',KEYS[1],'roomId')~=ARGV[1] then return redis.error_reply('STATE_CHANGED') end; local raw=redis.call('HGET',KEYS[1],ARGV[2]); if not raw then return redis.error_reply('INVALID_CODE') end; local team=cjson.decode(raw); if team.accessCode~=ARGV[3] then return redis.error_reply('INVALID_CODE') end; if team.deviceId and team.deviceId~=cjson.null and team.deviceId~=ARGV[4] then return redis.error_reply('DEVICE_TAKEN') end; if (not team.deviceId or team.deviceId==cjson.null) and redis.call('HGET',KEYS[1],'phase')~='lobby' then return redis.error_reply('LOBBY_CLOSED') end; team.deviceId=ARGV[4]; team.joined=true; redis.call('HSET',KEYS[1],ARGV[2],cjson.encode(team),'updatedAt',ARGV[5]); return 1";
-      try { await command(['EVAL', script, '1', key, expectedRoomId, teamId, expectedCode, deviceId, updatedAt]); }
+    async bindDeviceIfAvailable(teamId, expectedRoomId, expectedCode, deviceId, teamName, updateTeamName, updatedAt) {
+      const script = "if redis.call('HGET',KEYS[1],'roomId')~=ARGV[1] then return redis.error_reply('STATE_CHANGED') end; local raw=redis.call('HGET',KEYS[1],ARGV[2]); if not raw then return redis.error_reply('INVALID_CODE') end; local team=cjson.decode(raw); if team.accessCode~=ARGV[3] then return redis.error_reply('INVALID_CODE') end; local phase=redis.call('HGET',KEYS[1],'phase'); if team.deviceId and team.deviceId~=cjson.null and team.deviceId~=ARGV[4] then return redis.error_reply('DEVICE_TAKEN') end; if (not team.deviceId or team.deviceId==cjson.null) and phase~='lobby' then return redis.error_reply('LOBBY_CLOSED') end; if not team.deviceId or team.deviceId==cjson.null or (phase=='lobby' and ARGV[6]=='1') then team.teamName=ARGV[5] end; team.deviceId=ARGV[4]; team.joined=true; redis.call('HSET',KEYS[1],ARGV[2],cjson.encode(team),'updatedAt',ARGV[7]); return 1";
+      try { await command(['EVAL', script, '1', key, expectedRoomId, teamId, expectedCode, deviceId, teamName, updateTeamName ? '1' : '0', updatedAt]); }
       catch (error) {
         if (error.message.includes('STATE_CHANGED')) throw new Error('Game state changed; refresh and retry');
         if (error.message.includes('INVALID_CODE')) throw new Error('Invalid team access code');

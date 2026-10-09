@@ -19,16 +19,17 @@ const decision = {
   stage: 'peak', action: 'pilot', mostInfluentialEvidence: 'fast_resolution', mainRisk: 'service_quality',
 };
 
-test('join endpoint accepts only a code and device identity and returns assigned context', async () => {
+test('join endpoint requires a team name with code and device identity and returns assigned context', async () => {
   const { dir, store } = setup();
   const initial = await store.load();
   const code = initial.teams['team-b'].accessCode;
   const join = await handleApiRequest({
-    method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId: 'device-beta-1234' }, store, hostKey: 'key',
+    method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId: 'device-beta-1234', teamName: 'ทีมคิดไกล' }, store, hostKey: 'key',
   });
   assert.equal(join.status, 200);
   assert.equal(join.body.teamId, 'team-b');
   assert.equal(join.body.state.teams['team-b'].companyId, initial.teams['team-b'].companyId);
+  assert.equal(join.body.state.teams['team-b'].teamName, 'ทีมคิดไกล');
   assert.equal(join.body.state.teams['team-a'].companyId, undefined);
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -37,10 +38,11 @@ test('joined code is rejected on another device and accepted again on the origin
   const { dir, store } = setup();
   const initial = await store.load();
   const code = initial.teams['team-a'].accessCode;
-  const request = (deviceId) => handleApiRequest({ method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId }, store, hostKey: 'key' });
+  const request = (deviceId, teamName = 'ทีมเดิม', updateTeamName = false) => handleApiRequest({ method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId, teamName, updateTeamName }, store, hostKey: 'key' });
   assert.equal((await request('device-one-1234')).status, 200);
   assert.equal((await request('device-two-5678')).status, 409);
-  assert.equal((await request('device-one-1234')).status, 200);
+  assert.equal((await request('device-one-1234', 'ชื่อใหม่')).body.state.teams['team-a'].teamName, 'ทีมเดิม');
+  assert.equal((await request('device-one-1234', 'ชื่อใหม่', true)).body.state.teams['team-a'].teamName, 'ชื่อใหม่');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -49,7 +51,7 @@ test('team-scoped state and mutations require matching code and bound device', a
   const initial = await store.load();
   const teamId = 'team-c';
   const code = initial.teams[teamId].accessCode;
-  await handleApiRequest({ method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId: 'device-gamma-1234' }, store, hostKey: 'key' });
+  await handleApiRequest({ method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId: 'device-gamma-1234', teamName: 'ทีมแกมมา' }, store, hostKey: 'key' });
   await handleApiRequest({ method: 'POST', pathname: '/api/host/phase', headers: { 'x-host-key': 'key' }, body: { phase: 'round1' }, store, hostKey: 'key' });
 
   const denied = await handleApiRequest({ method: 'POST', pathname: `/api/teams/${teamId}/submissions/1`, headers: playerHeaders(teamId, code, 'other-device-1234'), body: decision, store, hostKey: 'key' });

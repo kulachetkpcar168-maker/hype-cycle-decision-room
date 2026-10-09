@@ -25,7 +25,7 @@ const validRound1 = {
 
 function joinedState(teamId = 'team-a', deviceId = 'device-alpha-1234') {
   const state = createInitialState();
-  return joinByCode(state, state.teams[teamId].accessCode, deviceId).state;
+  return joinByCode(state, state.teams[teamId].accessCode, deviceId, 'ทีมสายฟ้า').state;
 }
 
 function advance(state, phases) {
@@ -54,24 +54,36 @@ test('access codes are unique readable four-character uppercase codes', () => {
 
 test('joining by code maps the player to a server-assigned team and binds its device', () => {
   const state = createInitialState();
-  const result = joinByCode(state, state.teams['team-b'].accessCode.toLowerCase(), 'device-beta-1234');
+  const result = joinByCode(state, state.teams['team-b'].accessCode.toLowerCase(), 'device-beta-1234', 'ทีมคิดไกล');
   assert.equal(result.teamId, 'team-b');
   assert.equal(result.state.teams['team-b'].joined, true);
   assert.equal(result.state.teams['team-b'].deviceId, 'device-beta-1234');
+  assert.equal(result.state.teams['team-b'].teamName, 'ทีมคิดไกล');
+});
+
+test('team name is required, trimmed, and limited to forty characters', () => {
+  const state = createInitialState();
+  const code = state.teams['team-a'].accessCode;
+  assert.throws(() => joinByCode(state, code, 'device-alpha-1234', ''), /team name/i);
+  assert.throws(() => joinByCode(state, code, 'device-alpha-1234', 'x'.repeat(41)), /team name/i);
+  const joined = joinByCode(state, code, 'device-alpha-1234', '  ทีมอนาคต  ').state;
+  assert.equal(joined.teams['team-a'].teamName, 'ทีมอนาคต');
 });
 
 test('same device may rejoin but a different device cannot reuse a joined code', () => {
   const state = createInitialState();
   const code = state.teams['team-c'].accessCode;
-  const first = joinByCode(state, code, 'device-one-1234').state;
-  assert.doesNotThrow(() => joinByCode(first, code, 'device-one-1234'));
-  assert.throws(() => joinByCode(first, code, 'device-two-5678'), /already joined/i);
+  const first = joinByCode(state, code, 'device-one-1234', 'ชื่อเดิม').state;
+  assert.equal(joinByCode(first, code, 'device-one-1234', 'ชื่อใหม่').state.teams['team-c'].teamName, 'ชื่อเดิม');
+  assert.equal(joinByCode(first, code, 'device-one-1234', 'ชื่อใหม่', true).state.teams['team-c'].teamName, 'ชื่อใหม่');
+  assert.throws(() => joinByCode(first, code, 'device-two-5678', 'อีกทีม'), /already joined/i);
 });
 
 test('a previously bound device may refresh or rejoin after the lobby', () => {
   let state = joinedState();
   state = transitionPhase(state, 'round1');
-  assert.doesNotThrow(() => joinByCode(state, state.teams['team-a'].accessCode, 'device-alpha-1234'));
+  const rejoined = joinByCode(state, state.teams['team-a'].accessCode, 'device-alpha-1234', 'เปลี่ยนไม่ได้', true);
+  assert.equal(rejoined.state.teams['team-a'].teamName, 'ทีมสายฟ้า');
 });
 
 test('host follows the approved phase sequence and cannot skip or go backward', () => {
@@ -141,6 +153,14 @@ test('public state hides codes, device identities, company mapping, and answers 
   assert.equal(output.teams['team-a'].deviceId, undefined);
   assert.equal(output.teams['team-a'].companyId, undefined);
   assert.equal(output.teams['team-a'].round1, undefined);
+  assert.equal(output.teams['team-a'].teamName, null);
+});
+
+test('public state uses joined team names as safe primary labels', () => {
+  const output = publicState(joinedState());
+  assert.equal(output.teams['team-a'].teamName, 'ทีมสายฟ้า');
+  assert.equal(output.teams['team-a'].label, 'ทีมสายฟ้า');
+  assert.equal(output.teams['team-b'].label, 'Team B');
 });
 
 test('device-scoped state reveals only that team company and answers', () => {

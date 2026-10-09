@@ -1,49 +1,44 @@
-# Vercel Deployment Plan — Hype Cycle Decision Room
+# Vercel Deployment — Hype Cycle Decision Room
 
 ## Current status
-The local VPS build works with a long-running Node server and JSON-file state. It must not be deployed to Vercel unchanged because shared game state written to the local filesystem is not a reliable persistent datastore for serverless deployments.
+The application is implemented for Vercel with shared production state in Upstash Redis. Local development uses JSON-file storage. The current data model is **schema-v3**.
 
-## Target free architecture
-- Vercel Hobby: static frontend + Node/Express Function
-- Upstash Redis Free: shared state for phase, team joins, Round 1/2 answers, and active pitch team
-- GitHub personal repository: source and automatic deployments
+## Production architecture
+- Vercel: static files from `public/` plus Node serverless API functions.
+- Upstash Redis: shared room state, randomized context assignment, device binding, phase changes, Round 1/2 submissions, and active pitch team.
+- GitHub private repository: source control and deployment source.
+- Server-side environment variables: `HOST_KEY`, `GAME_STATE_KEY`, and either the `UPSTASH_REDIS_REST_*` or `KV_REST_API_*` URL/token pair.
 
-## Team contexts
-1. NovaCart — 12-person e-commerce startup, 2,000 chats/week, 8 months runway, 3 support staff.
-2. SiamStay — five-property boutique hotel SME, multilingual booking/refund questions, online reviews affect revenue.
-3. MetroBank — large regulated bank, millions of customers, sensitive account/card/payment data.
+Credentials must never be placed in browser JavaScript, documentation, Git, or Obsidian.
 
-## Required code migration
-1. Add a Redis storage adapter using `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
-2. Keep file storage only for local development.
-3. Export the HTTP/API app in a Vercel-compatible entry point.
-4. Keep static assets under `public/`.
-5. Add `vercel.json` only for `/host` rewrite and security/cache headers if required.
-6. Run the existing automated test suite against both file storage and an in-memory storage test double.
+## Schema-v3 classroom identity model
+- นักเรียน **ทีมตั้งชื่อเอง** เมื่อเข้าร่วมด้วยรหัสสี่ตัว
+- ระบบสุ่ม **บริบทธุรกิจจำลอง** ให้แต่ละทีมแบบไม่ซ้ำกัน
+- Internal team IDs remain stable (`team-a`, `team-b`, `team-c`), while the UI uses the student-created team name.
+- Klarna is the real case; its published metrics are labeled as company-reported evidence.
+- The assigned business contexts and the teams' Hype Cycle judgments are not presented as real companies or official Gartner classifications.
 
-## Dashboard deployment steps
-1. Create a personal GitHub repository for this project and push the verified code.
-2. Sign in to Vercel with the same GitHub account.
-3. In Vercel, select **New Project**, import the repository, and deploy it under the Hobby plan.
-4. Open the project Marketplace/Storage integrations and install **Upstash Redis**; create/link a Free database.
-5. Confirm Vercel injected the Upstash REST environment variables.
-6. Add a sensitive `HOST_KEY` environment variable in Project Settings → Environment Variables.
-7. Redeploy because environment-variable changes affect only new deployments.
-8. Verify `/`, `/host`, all three team joins, both submission rounds, locking, pitch mode, reset, and mobile QR access.
+## Storage and concurrency safeguards
+- Production storage uses Upstash Redis; local development uses file storage only.
+- State includes `schemaVersion` and `roomId`.
+- Incompatible or malformed Redis room data is atomically replaced.
+- Team writes verify the device binding, access code, phase, and expected `roomId` in the same storage operation.
+- Public state hides other teams' answers and private contexts until host-controlled reveal/pitch phases.
 
-## Free-plan constraints
-- Vercel Hobby is restricted to personal, non-commercial use. This classroom assignment fits only while it remains educational and non-commercial.
-- Upstash Redis Free currently includes 256 MB and 500,000 commands/month; monitor the provider dashboard and do not add billing without owner approval.
+## Vercel routing
+- `/` serves the player interface.
+- `/host` rewrites to the facilitator interface.
+- `/api/:path*` rewrites to the explicit API entry point using the `route` query value.
+- Security headers and Content Security Policy are defined in `vercel.json`.
 
-## Approval boundaries
-- Creating a GitHub repository, connecting Vercel, provisioning Upstash, adding environment variables, and deploying publicly are external state changes and require owner approval.
-- Never commit `HOST_KEY` or Redis credentials into Git.
+## Deployment verification checklist
+1. Run the full automated test suite, JavaScript syntax checks, and `git diff --check`.
+2. Confirm no credentials or local state files are staged.
+3. Deploy the verified commit to Vercel.
+4. Verify `/`, `/host`, `/api/state`, and the locally hosted QR asset.
+5. Exercise reset, three unique joins, duplicate-device rejection, both decision rounds, reveal, pitch selection, and takeaway.
+6. Confirm a stale request from an old `roomId` is rejected after reset.
+7. Confirm the projected screen does not expose a team's assigned context before its pitch.
 
-## Sources
-- https://vercel.com/docs/plans/hobby
-- https://vercel.com/docs/git
-- https://vercel.com/docs/frameworks/backend/express
-- https://vercel.com/docs/environment-variables/managing-environment-variables
-- https://vercel.com/docs/redis
-- https://vercel.com/marketplace/upstash
-- https://upstash.com/pricing/redis
+## Approval boundary
+Public deployment, environment-variable changes, and production reset require owner approval. This document records the approved architecture but does not expose any secret value.

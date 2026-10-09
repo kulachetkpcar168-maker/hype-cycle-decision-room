@@ -43,7 +43,7 @@ function createInitialState() {
   const companies = shuffle(COMPANY_IDS);
   const codes = createUniqueCodes();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     roomId: crypto.randomBytes(12).toString('base64url'),
     phase: 'lobby',
     phaseStartedAt: null,
@@ -53,6 +53,7 @@ function createInitialState() {
     teams: Object.fromEntries(TEAM_IDS.map((id, index) => [id, {
       id,
       label: `Team ${String.fromCharCode(65 + index)}`,
+      teamName: null,
       companyId: companies[index],
       accessCode: codes[index],
       deviceId: null,
@@ -91,7 +92,13 @@ function normalizeDeviceId(deviceId) {
   return deviceId;
 }
 
-function joinByCode(state, code, deviceId) {
+function normalizeTeamName(teamName) {
+  const normalized = typeof teamName === 'string' ? teamName.trim().replace(/\s+/g, ' ') : '';
+  if (normalized.length < 1 || normalized.length > 40) throw new Error('Invalid team name: use 1-40 characters');
+  return normalized;
+}
+
+function joinByCode(state, code, deviceId, teamName, updateTeamName = false) {
   const normalizedCode = typeof code === 'string' ? code.trim().toUpperCase() : '';
   const normalizedDevice = normalizeDeviceId(deviceId);
   const teamId = TEAM_IDS.find((id) => state.teams[id].accessCode === normalizedCode);
@@ -99,9 +106,11 @@ function joinByCode(state, code, deviceId) {
   const team = state.teams[teamId];
   if (team.deviceId && team.deviceId !== normalizedDevice) throw new Error('This team code is already joined on another device');
   if (!team.deviceId && state.phase !== 'lobby') throw new Error('New teams can join only during lobby');
+  const normalizedName = team.deviceId && !updateTeamName ? team.teamName : normalizeTeamName(teamName);
   const next = clone(state);
   next.teams[teamId].joined = true;
   next.teams[teamId].deviceId = normalizedDevice;
+  if (!team.deviceId || (state.phase === 'lobby' && updateTeamName)) next.teams[teamId].teamName = normalizedName;
   next.updatedAt = new Date().toISOString();
   return { state: next, teamId };
 }
@@ -170,7 +179,8 @@ function publicState(state, viewer = {}) {
       const team = state.teams[id];
       const safe = {
         id: team.id,
-        label: team.label,
+        label: team.teamName || team.label,
+        teamName: team.teamName || null,
         joined: team.joined,
         submittedRound1: Boolean(team.round1),
         submittedRound2: Boolean(team.round2),

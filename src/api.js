@@ -43,12 +43,14 @@ async function handleApiRequest({ method, pathname, headers = {}, body = {}, sto
 
     if (pathname === '/api/join' && method === 'POST') {
       const current = await store.load();
-      const joined = joinByCode(current, body.code, body.deviceId);
+      const joined = joinByCode(current, body.code, body.deviceId, body.teamName, body.updateTeamName === true);
       await store.bindDeviceIfAvailable(
         joined.teamId,
         current.roomId,
         current.teams[joined.teamId].accessCode,
         body.deviceId,
+        joined.state.teams[joined.teamId].teamName,
+        body.updateTeamName === true,
         joined.state.updatedAt
       );
       const state = await store.load();

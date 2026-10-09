@@ -1,25 +1,25 @@
-# Hype Cycle Decision Room — Approved Classroom Specification
+# Hype Cycle Decision Room — Approved Thai-first Specification
 
 ## Purpose
-A 20-minute, non-competitive classroom activity for one facilitator and exactly three teams. Teams use the same Agentic AI customer-service evidence to make context-sensitive strategic judgments. There is no score, vote, ranking, leaderboard, winner, or universal correct action.
+กิจกรรม 20 นาทีสำหรับ Facilitator และ 3 ทีม ใช้ Evidence เดียวกันเพื่อฝึกตีความ Hype Cycle และเลือก Action ตามบริบท โดยไม่เพิ่มระบบคะแนนหรือการแข่งขัน
 
-## Activity timing
-Rules 2 minutes; code assignment 1; Round 1 4; new-information transition 1; Round 2 4; reveal 2; pitches 6 (2 minutes each). Takeaway/debrief is outside the 20-minute activity. Pitch screens show no timer.
+## Access and identity
+ระบบสร้าง Team A/B/C เป็น fallback และสุ่มจับคู่บริบทจำลองสามแบบหนึ่งต่อหนึ่ง: สตาร์ทอัพ E-commerce ไทยที่กำลังเติบโต, กลุ่มโรงแรมบูติก 5 แห่ง, และสถาบันการเงินขนาดใหญ่ภายใต้การกำกับ. ผู้เล่นเข้าด้วยรหัส 4 ตัว, `deviceId`, และ `teamName` 1–40 ตัวอักษร. การเข้าครั้งแรกผูกทั้งสามค่า; อุปกรณ์เดิม refresh/rejoin ได้โดยชื่อไม่เปลี่ยน. เปลี่ยนชื่อได้เฉพาะใน lobby เมื่อส่งคำขอแก้ชื่ออย่างชัดเจน. จอสาธารณะใช้ชื่อทีมและไม่เปิดเผย code/device/context ก่อน pitch.
 
-## Teams and access
-The server creates Team A, Team B, and Team C. On every reset it randomly maps NovaCart, SiamStay, and MetroBank one-to-one to those labels and creates unique readable four-character uppercase codes excluding ambiguous characters. Players never select a team or company; they enter a code. The first join binds that team to a client-generated deviceId. The same device may refresh/rejoin; another device is rejected until reset. The browser persists teamId, code, and deviceId in localStorage. Codes and device identities are never returned by public state.
-
-## Phases
-Exactly: `lobby`, `round1`, `round2`, `reveal`, `pitch`, `takeaway`. Only the host changes phase. Entering Round 1 or Round 2 sets a server-synchronized four-minute deadline. At 30 seconds the UI warns. Zero neither advances nor locks the round.
+## Phases and timing
+คง 6 phases: `lobby`, `round1`, `round2`, `reveal`, `pitch`, `takeaway`. Host เท่านั้นที่เปลี่ยน phase. Round 1/2 มี deadline 4 นาที; timer ถึงศูนย์ไม่ lock หรือ advance. Pitch ไม่มี timer.
 
 ## Decisions
-Each round accepts only `stage`, `action`, exactly one `mostInfluentialEvidence`, and exactly one `mainRisk`. Stage is innovation, peak, trough, slope, or plateau. Action is invest, pilot, wait, or stop. Evidence and risk values must be approved IDs. Teams may explicitly edit/resubmit while the phase remains open. After submission the player sees a dedicated saved/waiting state. Round 2 shows the Round 1 answer and new information together.
+แต่ละรอบส่งเฉพาะ `stage`, `action`, `mostInfluentialEvidence`, `mainRisk`. Stage: innovation/peak/trough/slope/plateau. Action: Invest/Pilot/Wait/Stop. Round 2 ต้องมี Round 1 ก่อนและแก้คำตอบได้ระหว่าง phase เปิด.
 
-## Projection privacy and pitch
-Before pitch, the projected dashboard shows only Team A/B/C, access codes, join/submission status, phase, and round timer—not company identities. During pitch, only the selected team's company is shown, with before/after decisions, influential evidence, main risk, and speaking guide. No pitch timer is displayed.
+## Player presentation
+Thai เป็นภาษาหลัก. หน้าร่วมกิจกรรมอธิบายกติกาและแยก “Klarna = กรณีศึกษาจริง” จาก “บริบทธุรกิจของทีม = สถานการณ์จำลอง”. หน้าบริบทใช้ประโยค “ชื่อทีม, บทบาทของคุณคือทีมผู้บริหารของ…”. การเลือก Stage ใช้ inline SVG Hype Cycle 5 จุดที่ responsive, keyboard-compatible, highlight จุดที่เลือก และแสดงคำอธิบายภาษาไทยหนึ่งประโยค.
 
-## Takeaway
-“Same technology. Same evidence. Different context. Different action.” The Hype Cycle informs strategic judgment rather than prescribing a universal decision.
+## Projected presentation
+Lobby แสดง rules, activity journey, QR/URL, วิธี join และสถานะชื่อทีม. Codes อยู่ใน host-only collapsed details. Round 1 มี client-side Previous/Next สำหรับ 3 slides: scale (2.3M, ⅔, 35+), operations (11→2, −25%, 700), interpretation ($40M, company-reported caution, decision question). Round 2 แสดง AI strengths เทียบ Human roles และ hybrid escalation. Reveal แสดงชื่อทีมและ before/after โดยไม่แสดง context. Pitch แสดงทีมที่เลือก บทบาท/context before/after Evidence Risk และ speaking guide. Takeaway สรุปภาษาไทย.
+
+## Provenance
+ใช้ป้าย “ข้อมูลจริงที่ Klarna รายงาน”, “ข้อมูลที่บริษัทรายงานเอง”, “ข้อมูลใหม่จากกรณีภายหลัง”, และ “บริบทธุรกิจจำลอง”. ห้ามอ้างว่า Gartner จัด Klarna ไว้ใน Stage ใด; Stage คือการตีความเชิงกลยุทธ์ของทีม.
 
 ## Technical constraints
-Node.js standard library only. Local JSON persistence; Upstash Redis in production. Preserve host authentication, roomId compare-and-set, atomic joins/submissions, request limits, safe public projection, and no committed credentials.
+Node.js standard library only. Preserve host authentication, roomId compare-and-set, randomized one-to-one mapping, device binding, safe public projection, request limits, schema migration, local atomic JSON writes, and Upstash atomic Lua operations. State schema v3 persists `teamName` and replaces incompatible older state atomically.
