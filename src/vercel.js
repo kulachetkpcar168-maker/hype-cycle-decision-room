@@ -10,9 +10,16 @@ function createVercelHandler({ store, hostKey, rateLimit = 180, rateWindowMs = 6
       response.setHeader('Cache-Control', 'no-store');
       return response.status(429).json({ error: 'Too many requests' });
     }
-    const route = request.query?.route;
-    const parts = Array.isArray(route) ? route : route ? [route] : [];
-    const pathname = `/api/${parts.join('/')}`;
+    let pathname = '';
+    if (request.url) {
+      try { pathname = new URL(request.url, 'http://localhost').pathname; }
+      catch { pathname = ''; }
+    }
+    if (!pathname.startsWith('/api/')) {
+      const route = request.query?.route;
+      const parts = Array.isArray(route) ? route : route ? [route] : [];
+      pathname = `/api/${parts.join('/')}`;
+    }
     let body;
     try { body = request.body || {}; }
     catch {

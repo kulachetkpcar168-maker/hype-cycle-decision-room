@@ -20,7 +20,7 @@ test('vercel handler maps catch-all route to shared API', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hype-vercel-'));
   const handler = createVercelHandler({ store: createFileStore(path.join(dir, 'state.json')), hostKey: 'key' });
   const res = mockResponse();
-  await handler({ method: 'GET', query: { route: ['state'] }, headers: {}, body: {} }, res);
+  await handler({ method: 'GET', url: '/api/state', query: {}, headers: {}, body: {} }, res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.payload.phase, 'lobby');
   assert.equal(res.headers['Cache-Control'], 'no-store');
