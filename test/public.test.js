@@ -38,6 +38,13 @@ test('player polling preserves focused lobby name and code inputs during same-ro
   assert.match(player, /sameRoom/); assert.match(player, /samePhase/);
 });
 
+test('player loads the session guard before polling code', () => {
+  const html = read('public/index.html');
+  assert.match(html, /session-guard\.js/);
+  assert.ok(html.indexOf('/session-guard.js') < html.indexOf('/player.js'));
+  assert.match(read('public/player.js'), /SessionGuard/);
+});
+
 test('host presentation teaches all phases and shows join codes during the lobby', () => {
   const host = read('public/host.js');
   for (const token of ['lobbyPresentation', 'roundOnePresentation', 'roundTwoPresentation', 'revealGrid', 'pitchCard', 'takeawayPresentation', 'teamName', '<details class="code-vault"']) assert.match(host, new RegExp(token));
@@ -45,6 +52,7 @@ test('host presentation teaches all phases and shows join codes during the lobby
   for (const token of ['2.3M', '⅔', '35+', '11→2', '−25%', '700', '$40M', 'สไลด์ก่อนหน้า', 'สไลด์ถัดไป', 'งานที่ AI ทำได้ดี', 'งานที่ยังต้องใช้คน', 'hybrid-escalation']) assert.ok(host.includes(token), token);
   assert.match(host, /เปลี่ยน Phase แล้ว/); assert.match(host, /activePitchTeam/); assert.doesNotMatch(host, /winner|leaderboard|score|ranking|vote/i);
   assert.match(host, /\/join-qr\.svg/); assert.doesNotMatch(host, /api\.qrserver\.com/);
+  for (const token of ['hostHypeGraph', 'host-hype-map', 'Innovation Trigger', 'Peak', 'Trough', 'Slope', 'Plateau', 'Evidence → Stage → Action']) assert.ok(host.includes(token), token);
 });
 
 test('content is Thai-first, uses unnamed simulated contexts, and labels provenance', () => {
@@ -61,7 +69,7 @@ test('audience copy avoids negative and system language', () => {
 
 test('CSS supports presentation, graph, timer, and responsive layouts', () => {
   const css = read('public/styles.css');
-  for (const token of ['.phase-hero', '.timer.warning', '.access-code', '.hype-cycle-chart', '.stage-point', '.presentation-slide', '.hybrid-escalation', '@media(max-width:760px)']) assert.ok(css.includes(token), token);
+  for (const token of ['.phase-hero', '.timer.warning', '.access-code', '.hype-cycle-chart', '.stage-point', '.host-hype-map', '.presentation-slide', '.hybrid-escalation', '@media(max-width:760px)', '.decision-flow{grid-template-columns:1fr}', '.graph-evidence-note{flex-direction:column']) assert.ok(css.includes(token), token);
   assert.match(css, /\.choice input:focus-visible\s*\+\s*span/);
   assert.match(css, /fieldset\.field/); assert.match(css, /legend/);
 });
