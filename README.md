@@ -18,7 +18,7 @@ Mobile-first classroom decision game for Gartner Technology Hype Cycle. Three te
 ## Local development
 
 ```bash
-HOST_KEY='replace-me' PORT=4871 npm start
+HOST_KEY='replace-me' PORT=4871 npm run dev
 npm test
 ```
 
