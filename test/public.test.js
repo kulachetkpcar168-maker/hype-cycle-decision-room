@@ -32,9 +32,16 @@ test('player polling preserves an active unsent draft when another team changes 
   assert.match(player, /ownAnswerChanged/); assert.match(player, /preserveDraft/);
 });
 
-test('host presentation teaches all phases and keeps codes collapsed', () => {
+test('player polling preserves focused lobby name and code inputs during same-room updates', () => {
+  const player = read('public/player.js');
+  assert.match(player, /joinFormActive/); assert.match(player, /preserveJoinEntry/);
+  assert.match(player, /sameRoom/); assert.match(player, /samePhase/);
+});
+
+test('host presentation teaches all phases and shows join codes during the lobby', () => {
   const host = read('public/host.js');
   for (const token of ['lobbyPresentation', 'roundOnePresentation', 'roundTwoPresentation', 'revealGrid', 'pitchCard', 'takeawayPresentation', 'teamName', '<details class="code-vault"']) assert.match(host, new RegExp(token));
+  assert.ok(host.includes("state.phase==='lobby'?'open':' '"));
   for (const token of ['2.3M', '⅔', '35+', '11→2', '−25%', '700', '$40M', 'สไลด์ก่อนหน้า', 'สไลด์ถัดไป', 'งานที่ AI ทำได้ดี', 'งานที่ยังต้องใช้คน', 'hybrid-escalation']) assert.ok(host.includes(token), token);
   assert.match(host, /เปลี่ยน Phase แล้ว/); assert.match(host, /activePitchTeam/); assert.doesNotMatch(host, /winner|leaderboard|score|ranking|vote/i);
   assert.match(host, /\/join-qr\.svg/); assert.doesNotMatch(host, /api\.qrserver\.com/);

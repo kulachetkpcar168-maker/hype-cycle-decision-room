@@ -136,7 +136,7 @@ function createUpstashStore(options = {}) {
     async load() {
       const initial = createInitialState();
       const fields = Object.entries(serializeStateFields(initial)).flat();
-      const script = "local valid=redis.call('EXISTS',KEYS[1])==1 and redis.call('HGET',KEYS[1],'schemaVersion')==ARGV[2]; local ids={'team-a','team-b','team-c'}; if valid then for _,id in ipairs(ids) do local raw=redis.call('HGET',KEYS[1],id); if not raw then valid=false; break end; local ok,team=pcall(cjson.decode,raw); if not ok or type(team)~='table' or type(team.id)~='string' or team.id~=id or type(team.accessCode)~='string' or team.accessCode=='' or type(team.companyId)~='string' or team.companyId=='' or team.teamName==nil then valid=false; break end end end; if not valid then redis.call('DEL',KEYS[1]); redis.call('HSET',KEYS[1],unpack(ARGV)) end; return redis.call('HGETALL',KEYS[1])";
+      const script = "local valid=redis.call('EXISTS',KEYS[1])==1 and redis.call('HGET',KEYS[1],'schemaVersion')==ARGV[2]; local ids={'team-a','team-b','team-c'}; if valid then for _,id in ipairs(ids) do local raw=redis.call('HGET',KEYS[1],id); if not raw then valid=false; break end; local ok,team=pcall(cjson.decode,raw); if not ok or type(team)~='table' or type(team.id)~='string' or team.id~=id or type(team.accessCode)~='string' or team.accessCode=='' or type(team.companyId)~='string' or team.companyId=='' or not string.find(raw,'\"teamName\"%s*:') then valid=false; break end end end; if not valid then redis.call('DEL',KEYS[1]); redis.call('HSET',KEYS[1],unpack(ARGV)) end; return redis.call('HGETALL',KEYS[1])";
       const state = deserializeRedisHash(await command(['EVAL', script, '1', key, ...fields]));
       return validPersistedState(state) ? state : initial;
     },

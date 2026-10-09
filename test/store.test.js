@@ -118,3 +118,17 @@ test('Upstash load atomically migrates incomplete or older schema state and keep
   assert.match(commands[0][1], /DEL/);
   assert.equal(deserializeRedisHash(['schemaVersion', '2', 'roomId', 'x', 'phase', 'lobby', 'team-a', 'null']), null);
 });
+
+test('Upstash validator accepts an explicit null teamName but rejects a missing teamName field', async () => {
+  const commands = [];
+  const fakeFetch = async (_url, options) => {
+    const command = JSON.parse(options.body); commands.push(command);
+    return { ok: true, json: async () => ({ result: Object.entries(serializeStateFields(createInitialState())).flat() }) };
+  };
+  const store = createUpstashStore({ url: 'https://example.upstash.io', token: 'test-token', fetchImpl: fakeFetch, key: 'room' });
+  await store.load();
+  const script = commands[0][1];
+  assert.match(script, /string\.find\(raw/);
+  assert.match(script, /teamName/);
+  assert.doesNotMatch(script, /team\.teamName==nil/);
+});
