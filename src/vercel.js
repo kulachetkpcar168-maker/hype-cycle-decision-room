@@ -1,24 +1,17 @@
 const { handleApiRequest } = require('./api');
+const { clientAddress, createRequestPolicy, resolveApiPathname } = require('./request-policy');
 
-function createVercelHandler({ store, hostKey, rateLimit = 180, rateWindowMs = 60_000, maxBodyBytes = 16_384 }) {
+function createVercelHandler({ store, hostKey, readRateLimit, writeRateLimit, readLimit, writeLimit, rateLimit, maxBodyBytes = 16_384 }) {
   if (!hostKey) throw new Error('Missing HOST_KEY configuration');
+  const policy = createRequestPolicy({ store, hostKey, readLimit: readRateLimit ?? readLimit ?? rateLimit, writeLimit: writeRateLimit ?? writeLimit ?? rateLimit });
   return async function vercelHandler(request, response) {
     const headers = request.headers || {};
-    const client = (headers['x-vercel-forwarded-for'] || headers['x-forwarded-for'] || 'unknown')
-      .split(',')[0].trim();
-    if (!await store.consumeRateLimit(client, rateLimit, rateWindowMs)) {
+    const pathname = resolveApiPathname(request);
+    const client = clientAddress(headers);
+    const check = await policy.check({ method: request.method, pathname, headers, client });
+    if (!check.allowed) {
       response.setHeader('Cache-Control', 'no-store');
       return response.status(429).json({ error: 'Too many requests' });
-    }
-    let pathname = '';
-    if (request.url) {
-      try { pathname = new URL(request.url, 'http://localhost').pathname; }
-      catch { pathname = ''; }
-    }
-    if (!pathname.startsWith('/api/')) {
-      const route = request.query?.route;
-      const parts = Array.isArray(route) ? route : route ? [route] : [];
-      pathname = `/api/${parts.join('/')}`;
     }
     let body;
     try { body = request.body || {}; }

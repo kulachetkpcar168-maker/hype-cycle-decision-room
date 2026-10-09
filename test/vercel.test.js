@@ -81,3 +81,17 @@ test('vercel limiter falls back to x-forwarded-for', async () => {
   assert.equal(await call(), 429);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('vercel classifies the resolved rewritten route into read and write buckets', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hype-vercel-'));
+  const store = createFileStore(path.join(dir, 'state.json'));
+  const handler = createVercelHandler({ store, hostKey: 'key', readLimit: 2, writeLimit: 1 });
+  const call = async (request) => { const res = mockResponse(); await handler({ headers: { 'x-forwarded-for': 'classroom' }, body: {}, ...request }, res); return res; };
+  assert.equal((await call({ method: 'GET', url: '/api?route=state', query: { route: 'state' } })).statusCode, 200);
+  assert.equal((await call({ method: 'GET', url: '/api?route=state', query: { route: 'state' } })).statusCode, 200);
+  assert.equal((await call({ method: 'GET', url: '/api?route=state', query: { route: 'state' } })).statusCode, 429);
+  assert.equal((await call({ method: 'GET', url: '/api?route=host/state', query: { route: ['host', 'state'] } })).statusCode, 401);
+  assert.equal((await call({ method: 'GET', url: '/api?route=host/state', query: { route: ['host', 'state'] } })).statusCode, 429);
+  assert.equal((await call({ method: 'GET', url: '/api?route=host/state', query: { route: ['host', 'state'] }, headers: { 'x-forwarded-for': 'classroom', 'x-host-key': 'key' } })).statusCode, 200);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

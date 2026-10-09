@@ -83,9 +83,17 @@ function createFileStore(storagePath) {
       if (next.roomId !== expectedRoomId) throw new Error('Game state changed; refresh and retry');
       if (!team || team.accessCode !== expectedCode) throw new Error('Invalid team access code');
       if (team.deviceId && team.deviceId !== deviceId) throw new Error('This team code is already joined on another device');
-      if (!team.deviceId && next.phase !== 'lobby') throw new Error('New teams can join only during lobby');
-      if (!team.deviceId || (next.phase === 'lobby' && updateTeamName)) team.teamName = teamName;
+      if (!team.deviceId && !team.joined && next.phase !== 'lobby') throw new Error('New teams can join only during lobby');
+      if (!team.joined || (next.phase === 'lobby' && updateTeamName)) team.teamName = teamName;
       team.deviceId = deviceId; team.joined = true; next.updatedAt = updatedAt; write(next);
+    },
+    async releaseDevice(teamId, expectedRoomId, expectedDeviceId, updatedAt) {
+      const next = read();
+      if (next.roomId !== expectedRoomId) throw new Error('Game state changed; refresh and retry');
+      const team = next.teams[teamId];
+      if (!team) throw new Error('Unknown team');
+      if (team.deviceId !== expectedDeviceId) throw new Error('Game state changed; refresh and retry');
+      team.deviceId = null; next.updatedAt = updatedAt; write(next);
     },
     async saveTeamIfDevice(teamId, team, updatedAt, expectedRoomId, expectedCode, expectedDeviceId, requiredPhase) {
       const next = read();
@@ -142,7 +150,7 @@ function createUpstashStore(options = {}) {
     },
     async saveTeam(teamId, team, updatedAt) { await command(['HSET', key, teamId, JSON.stringify(team), 'updatedAt', updatedAt]); },
     async bindDeviceIfAvailable(teamId, expectedRoomId, expectedCode, deviceId, teamName, updateTeamName, updatedAt) {
-      const script = "if redis.call('HGET',KEYS[1],'roomId')~=ARGV[1] then return redis.error_reply('STATE_CHANGED') end; local raw=redis.call('HGET',KEYS[1],ARGV[2]); if not raw then return redis.error_reply('INVALID_CODE') end; local team=cjson.decode(raw); if team.accessCode~=ARGV[3] then return redis.error_reply('INVALID_CODE') end; local phase=redis.call('HGET',KEYS[1],'phase'); if team.deviceId and team.deviceId~=cjson.null and team.deviceId~=ARGV[4] then return redis.error_reply('DEVICE_TAKEN') end; if (not team.deviceId or team.deviceId==cjson.null) and phase~='lobby' then return redis.error_reply('LOBBY_CLOSED') end; if not team.deviceId or team.deviceId==cjson.null or (phase=='lobby' and ARGV[6]=='1') then team.teamName=ARGV[5] end; team.deviceId=ARGV[4]; team.joined=true; redis.call('HSET',KEYS[1],ARGV[2],cjson.encode(team),'updatedAt',ARGV[7]); return 1";
+      const script = "if redis.call('HGET',KEYS[1],'roomId')~=ARGV[1] then return redis.error_reply('STATE_CHANGED') end; local raw=redis.call('HGET',KEYS[1],ARGV[2]); if not raw then return redis.error_reply('INVALID_CODE') end; local team=cjson.decode(raw); if team.accessCode~=ARGV[3] then return redis.error_reply('INVALID_CODE') end; local phase=redis.call('HGET',KEYS[1],'phase'); if team.deviceId and team.deviceId~=cjson.null and team.deviceId~=ARGV[4] then return redis.error_reply('DEVICE_TAKEN') end; if (not team.deviceId or team.deviceId==cjson.null) and not team.joined and phase~='lobby' then return redis.error_reply('LOBBY_CLOSED') end; if not team.joined or (phase=='lobby' and ARGV[6]=='1') then team.teamName=ARGV[5] end; team.deviceId=ARGV[4]; team.joined=true; redis.call('HSET',KEYS[1],ARGV[2],cjson.encode(team),'updatedAt',ARGV[7]); return 1";
       try { await command(['EVAL', script, '1', key, expectedRoomId, teamId, expectedCode, deviceId, teamName, updateTeamName ? '1' : '0', updatedAt]); }
       catch (error) {
         if (error.message.includes('STATE_CHANGED')) throw new Error('Game state changed; refresh and retry');
@@ -151,6 +159,12 @@ function createUpstashStore(options = {}) {
         if (error.message.includes('LOBBY_CLOSED')) throw new Error('New teams can join only during lobby');
         throw error;
       }
+    },
+
+    async releaseDevice(teamId, expectedRoomId, expectedDeviceId, updatedAt) {
+      const script = "if redis.call('HGET',KEYS[1],'roomId')~=ARGV[1] then return redis.error_reply('STATE_CHANGED') end; local raw=redis.call('HGET',KEYS[1],ARGV[2]); if not raw then return redis.error_reply('UNKNOWN_TEAM') end; local team=cjson.decode(raw); if team.deviceId~=ARGV[3] then return redis.error_reply('STATE_CHANGED') end; team.deviceId=cjson.null; redis.call('HSET',KEYS[1],ARGV[2],cjson.encode(team),'updatedAt',ARGV[4]); return 1";
+      try { await command(['EVAL', script, '1', key, expectedRoomId, teamId, expectedDeviceId, updatedAt]); }
+      catch (error) { if (error.message.includes('STATE_CHANGED')) throw new Error('Game state changed; refresh and retry'); if (error.message.includes('UNKNOWN_TEAM')) throw new Error('Unknown team'); throw error; }
     },
     async saveTeamIfDevice(teamId, team, updatedAt, expectedRoomId, expectedCode, expectedDeviceId, requiredPhase) {
       const script = "if redis.call('HGET',KEYS[1],'roomId')~=ARGV[1] then return redis.error_reply('STATE_CHANGED') end; local raw=redis.call('HGET',KEYS[1],ARGV[2]); if not raw then return redis.error_reply('INVALID_PLAYER') end; local current=cjson.decode(raw); if current.accessCode~=ARGV[3] or current.deviceId~=ARGV[4] then return redis.error_reply('INVALID_PLAYER') end; if redis.call('HGET',KEYS[1],'phase')~=ARGV[5] then return redis.error_reply('PHASE_LOCKED') end; redis.call('HSET',KEYS[1],ARGV[2],ARGV[6],'updatedAt',ARGV[7]); return 1";

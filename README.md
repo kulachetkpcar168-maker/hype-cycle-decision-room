@@ -19,3 +19,20 @@ Player: `http://localhost:4871/`
 Host: `http://localhost:4871/host`
 
 Local state อยู่ที่ `data/state.json`; schema รุ่นปัจจุบันคือ v3 และ state รุ่นเก่าจะถูกแทนที่อย่าง atomic. Production ใช้ Upstash Redis โดยตั้ง `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `HOST_KEY` และ `GAME_STATE_KEY` (ถ้าต้องการ). ห้าม commit credentials.
+
+
+## Classroom reliability checklist
+- ตั้ง `HOST_KEY`, Upstash, `RATE_LIMIT_READ_PER_MIN=3000`, และ `RATE_LIMIT_WRITE_PER_MIN=180` ก่อนเปิดห้อง
+- เปิด Host และ Player บนเครือข่ายจริง ตรวจ QR, รหัสทีม และการ join ครบ 3 ทีม
+- ทดสอบปุ่ม “ปล่อยอุปกรณ์” ด้วยห้องทดลอง และยืนยันว่าอุปกรณ์เดิมส่งคำตอบไม่ได้
+- ซ่อน/เปิดแท็บ Player และ Host เพื่อยืนยัน polling กลับมาทันทีโดย draft และ Host Key ยังอยู่
+- สร้าง QR ใหม่เมื่อ URL เปลี่ยน: `npm run generate:qr -- https://example.com/`
+- ห้าม reset ห้อง production หรือเปลี่ยน environment ระหว่างชั้นเรียน
+
+
+## Classroom reliability checklist
+- Before class, open `/host`, confirm all three access codes, and test the projected QR from a phone.
+- Keep the facilitator tab visible during transitions; hidden tabs pause polling and refresh immediately when visible again.
+- If a team changes device, use **ปล่อยอุปกรณ์** for that joined team, confirm the prompt, then let the team re-enter its original code. Existing name, context, and answers are preserved.
+- Anonymous join screens poll every 8 seconds; joined players and the host poll every 1.5 seconds. The 250 ms countdown display is local and does not increase API traffic.
+- Regenerate the checked-in fallback QR with `npm run generate:qr -- https://hype-cycle-decision-room.vercel.app/` and verify it before deployment.

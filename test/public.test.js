@@ -18,6 +18,13 @@ test('player has timer, submitted editing flow, and round two evidence', () => {
   assert.doesNotMatch(player, /confidence|changedBy|reason|kpi|type="checkbox"/i);
 });
 
+test('player takeaway includes the expanded Hype Cycle lessons', () => {
+  const player = read('public/player.js');
+  const common = read('public/common.js');
+  assert.match(player, /C\.keyTakeaways\.map/);
+  for (const text of ['Stage ไม่ใช่คะแนน', 'Evidence ใหม่เปลี่ยนคำตัดสินได้', 'กำหนด use case, Guardrail, KPI และวันทบทวน']) assert.ok(common.includes(text), text);
+});
+
 test('player stage choice includes accessible inline Hype Cycle SVG and Thai explanations', () => {
   const player = read('public/player.js');
   assert.match(player, /<svg[^>]+hype-cycle-chart/); assert.match(player, /role="img"/); assert.match(player, /aria-labelledby/);
@@ -53,6 +60,25 @@ test('host presentation teaches all phases and shows join codes during the lobby
   assert.match(host, /เปลี่ยน Phase แล้ว/); assert.match(host, /activePitchTeam/); assert.doesNotMatch(host, /winner|leaderboard|score|ranking|vote/i);
   assert.match(host, /\/join-qr\.svg/); assert.doesNotMatch(host, /api\.qrserver\.com/);
   for (const token of ['hostHypeGraph', 'host-hype-map', 'Innovation Trigger', 'Peak', 'Trough', 'Slope', 'Plateau', 'Evidence → Stage → Action']) assert.ok(host.includes(token), token);
+});
+
+test('selected-team pitch shows both rounds with each round evidence and risk', () => {
+  const host = read('public/host.js');
+  for (const token of ['pitchDecisionCard', "pitchDecisionCard(t.round1,'Before')", "pitchDecisionCard(t.round2,'After')", 'Evidence ที่มีอิทธิพลที่สุด', 'ความเสี่ยงหลัก']) assert.ok(host.includes(token), token);
+  assert.doesNotMatch(host, /Evidence ที่เปลี่ยนคำตัดสิน/);
+  assert.doesNotMatch(host, /latest=t\.round2\|\|t\.round1/);
+});
+
+test('decision dropdown labels use clear Thai business language', () => {
+  const common = read('public/common.js');
+  for (const text of ['AI รับผิดชอบแชตประมาณ 2 ใน 3', 'เวลาแก้ปัญหาลดจาก 11 เหลือไม่ถึง 2 นาที', 'Klarna คาดว่ากำไรดีขึ้น $40M ในปี 2024', 'ข้อควรระวัง: ตัวเลขมาจากบริษัท', 'เคสซับซ้อนต้องส่งต่อให้คน', 'ความยากในการเชื่อมระบบ ข้อมูล และ Workflow', 'ความเสียหายจากคำตอบหรือการตัดสินใจผิด']) assert.ok(common.includes(text), text);
+  assert.doesNotMatch(common, /กำไรเพิ่ม \$40M ต่อปี/);
+});
+
+test('takeaway phase supports a five-minute four-slide debrief', () => {
+  const host = read('public/host.js');
+  for (const token of ['takeawaySlides', 'สรุปกรณี Klarna', 'จาก Evidence สู่ Hype Cycle', 'ทำอะไรต่อในแต่ละ Stage', '5 Key Takeaways', 'Peak → Trough / Slope', 'Experiment', 'ตรวจสมมติฐาน', 'ปรับ use case', 'Scale อย่างมีวินัย', 'Stage ไม่ใช่คะแนน']) assert.ok(host.includes(token), token);
+  assert.match(host, /สรุปบทเรียน · สไลด์/);
 });
 
 test('host loads the key-form polling gate before dashboard code', () => {

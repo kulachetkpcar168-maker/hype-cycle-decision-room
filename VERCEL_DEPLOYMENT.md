@@ -42,3 +42,15 @@ Credentials must never be placed in browser JavaScript, documentation, Git, or O
 
 ## Approval boundary
 Public deployment, environment-variable changes, and production reset require owner approval. This document records the approved architecture but does not expose any secret value.
+
+
+## Reliability configuration
+- Pin Vercel Functions to `sin1` (AWS `ap-southeast-1`) and enable Fluid compute for steadier classroom concurrency.
+- Set `RATE_LIMIT_READ_PER_MIN=3000` for anonymous `GET /api/state` polling and `RATE_LIMIT_WRITE_PER_MIN=180` for other unauthenticated API traffic. Authenticated host routes bypass these buckets.
+- Regenerate the local fallback QR after the production root URL changes with `npm run generate:qr -- <absolute-root-url>` and verify `public/join-qr.svg`; no CDN is used.
+
+
+## Classroom reliability settings
+- Vercel Functions are pinned to `sin1` (AWS `ap-southeast-1`) to keep compute near the Bangkok classroom; enable Vercel Fluid compute for burst handling.
+- `RATE_LIMIT_READ_PER_MIN` defaults to `3000` for anonymous `GET /api/state`; `RATE_LIMIT_WRITE_PER_MIN` defaults to `180` for writes and invalid host requests. Authenticated host routes bypass rate limiting.
+- The checked-in `public/join-qr.svg` is the offline fallback. Regenerate it with `npm run generate:qr -- https://hype-cycle-decision-room.vercel.app/`.

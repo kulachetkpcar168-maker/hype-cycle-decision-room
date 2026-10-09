@@ -1,3 +1,4 @@
+const { hostKeysEqual } = require('./request-policy');
 const {
   createInitialState,
   joinByCode,
@@ -87,7 +88,7 @@ async function handleApiRequest({ method, pathname, headers = {}, body = {}, sto
     }
 
     if (pathname.startsWith('/api/host/')) {
-      if (!hostKey || headers['x-host-key'] !== hostKey) {
+      if (!hostKeysEqual(hostKey, headers['x-host-key'])) {
         return { status: 401, body: { error: 'Invalid host key' } };
       }
 
@@ -111,6 +112,16 @@ async function handleApiRequest({ method, pathname, headers = {}, body = {}, sto
         const current = await store.load();
         const next = setActivePitchTeam(current, body.teamId);
         await store.setActivePitchTeam(current.roomId, current.phase, next.activePitchTeam, next.updatedAt);
+        return { status: 200, body: await store.load() };
+      }
+
+      if (pathname === '/api/host/release-device' && method === 'POST') {
+        const fields = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body).sort() : [];
+        if (fields.join(',') !== 'roomId,teamId') throw new Error('Invalid release request');
+        if (!['team-a', 'team-b', 'team-c'].includes(body.teamId) || typeof body.roomId !== 'string') throw new Error('Invalid release request');
+        const expectedDeviceId = headers['x-expected-device-id'];
+        if (typeof expectedDeviceId !== 'string' || expectedDeviceId.length < 8) throw new Error('Invalid release request');
+        await store.releaseDevice(body.teamId, body.roomId, expectedDeviceId, new Date().toISOString());
         return { status: 200, body: await store.load() };
       }
 

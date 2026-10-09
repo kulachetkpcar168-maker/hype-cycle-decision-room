@@ -5,7 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "test": "node --test",
-    "dev": "node src/server.js"
+    "dev": "node src/server.js",
+    "generate:qr": "node scripts/generate-join-qr.js"
   },
   "engines": {
     "node": ">=22"
