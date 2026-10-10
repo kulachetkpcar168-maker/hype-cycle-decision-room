@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { svg } = require('../scripts/generate-join-qr');
+const browserQr = require('../public/qr');
 
 function modulesFromSvg(source) {
   const size = Number(source.match(/viewBox="0 0 (\d+) \d+"/)[1]);
@@ -63,4 +64,10 @@ test('standard-library QR generator encodes arbitrary explicit root URLs into ac
 });
 test('checked-in fallback QR modules decode to the configured production root', () => {
   assert.equal(decodePayload(modulesFromSvg(fs.readFileSync(path.join(__dirname, '../public/join-qr.svg'), 'utf8'))), 'https://hype-cycle-decision-room.vercel.app/');
+});
+
+test('browser QR generator encodes a signed spectator URL', () => {
+  const url = 'https://hype-cycle-decision-room.vercel.app/?s=a.ABCDEFGHIJKLMNOPQRSTUV';
+  assert.equal(decodePayload(modulesFromSvg(browserQr.svg(url))), url);
+  assert.match(browserQr.svgDataUrl(url), /^data:image\/svg\+xml/);
 });
