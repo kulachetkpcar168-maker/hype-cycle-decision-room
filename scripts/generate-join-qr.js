@@ -1,14 +1,17 @@
-const fs=require('node:fs');
-const path=require('node:path');
-const VERSION=4,SIZE=33,DATA_CODEWORDS=80,ECC_CODEWORDS=20,QUIET=4;
-function gfMul(x,y){let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11d);if((y>>>i)&1)z^=x}return z}
-function reedSolomon(data,degree){let divisor=[1];for(let i=0,root=1;i<degree;i++,root=gfMul(root,2)){const next=Array(divisor.length+1).fill(0);for(let j=0;j<divisor.length;j++){next[j]^=divisor[j];next[j+1]^=gfMul(divisor[j],root)}divisor=next}const result=Array(degree).fill(0);for(const value of data){const factor=value^result.shift();result.push(0);for(let i=0;i<degree;i++)result[i]^=gfMul(divisor[i+1],factor)}return result}
-function append(bits,value,length){for(let i=length-1;i>=0;i--)bits.push((value>>>i)&1)}
-function codewords(text){const bytes=[...Buffer.from(text,'utf8')];if(bytes.length>78)throw Error('URL is too long for QR version 4-L');const bits=[];append(bits,4,4);append(bits,bytes.length,8);for(const b of bytes)append(bits,b,8);for(let i=0;i<Math.min(4,DATA_CODEWORDS*8-bits.length);i++)bits.push(0);while(bits.length%8)bits.push(0);const data=[];for(let i=0;i<bits.length;i+=8)data.push(parseInt(bits.slice(i,i+8).join(''),2));for(let pad=0;data.length<DATA_CODEWORDS;pad++)data.push(pad%2?0x11:0xec);return data.concat(reedSolomon(data,ECC_CODEWORDS))}
-function maskBit(mask,x,y){return [()=>((x+y)%2)==0,()=>y%2==0,()=>x%3==0,()=>((x+y)%3)==0,()=>((Math.floor(y/2)+Math.floor(x/3))%2)==0,()=>(((x*y)%2+(x*y)%3)==0),()=>((((x*y)%2+(x*y)%3)%2)==0),()=>((((x+y)%2+(x*y)%3)%2)==0)][mask]()}
-function formatBits(mask){let data=(1<<3)|mask,rem=data;for(let i=0;i<10;i++)rem=(rem<<1)^(((rem>>>9)&1)*0x537);return ((data<<10)|rem)^0x5412}
-function makeMatrix(payload,mask=0){const m=Array.from({length:SIZE},()=>Array(SIZE).fill(false)),f=Array.from({length:SIZE},()=>Array(SIZE).fill(false));const set=(x,y,v=true)=>{if(x>=0&&y>=0&&x<SIZE&&y<SIZE){m[y][x]=v;f[y][x]=true}};function finder(cx,cy){for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const d=Math.max(Math.abs(dx),Math.abs(dy));set(cx+dx,cy+dy,d!==2&&d!==4)}}finder(3,3);finder(SIZE-4,3);finder(3,SIZE-4);for(let i=8;i<SIZE-8;i++){set(i,6,i%2===0);set(6,i,i%2===0)}for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(26+dx,26+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);for(let i=0;i<9;i++){if(i!==6){set(8,i);set(i,8)}}for(let i=0;i<8;i++){set(SIZE-1-i,8);set(8,SIZE-1-i)}set(8,SIZE-8,true);const bits=[];for(const b of codewords(payload))append(bits,b,8);let k=0,up=true;for(let right=SIZE-1;right>=1;right-=2){if(right===6)right--;for(let j=0;j<SIZE;j++){const y=up?SIZE-1-j:j;for(let dx=0;dx<2;dx++){const x=right-dx;if(!f[y][x])m[y][x]=(k<bits.length?bits[k++]:0)^maskBit(mask,x,y)}}up=!up}const fmt=formatBits(mask);for(let i=0;i<15;i++){const bit=((fmt>>>i)&1)!==0;const a=i<6?[8,i]:i<8?[8,i+1]:i===8?[7,8]:[14-i,8];const b=i<8?[SIZE-1-i,8]:i===8?[8,SIZE-8]:[8,SIZE-15+i];set(a[0],a[1],bit);set(b[0],b[1],bit)}set(8,SIZE-8,true);return m}
-function svg(payload){const m=makeMatrix(payload);const size=SIZE+QUIET*2;const rects=[];for(let y=0;y<SIZE;y++)for(let x=0;x<SIZE;x++)if(m[y][x])rects.push(`<rect x="${x+QUIET}" y="${y+QUIET}" width="1" height="1"/>`);return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img" aria-label="QR code for ${payload.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"><rect width="${size}" height="${size}" fill="#fff"/><g fill="#000">${rects.join('')}</g></svg>\n`}
-function main(args=process.argv.slice(2)){if(args.length!==1||!/^https?:\/\//.test(args[0]))throw Error('Usage: node scripts/generate-join-qr.js <absolute-url>');fs.writeFileSync(path.resolve(__dirname,'../public/join-qr.svg'),svg(args[0]))}
-if(require.main===module){try{main()}catch(e){console.error(e.message);process.exitCode=1}}
-module.exports={makeMatrix,svg};
+const fs = require('node:fs');
+const path = require('node:path');
+const { makeMatrix, svg } = require('../public/qr');
+
+function main(args = process.argv.slice(2)) {
+  if (args.length !== 1 || !/^https?:\/\//.test(args[0])) {
+    throw Error('Usage: node scripts/generate-join-qr.js <absolute-url>');
+  }
+  fs.writeFileSync(path.resolve(__dirname, '../public/join-qr.svg'), svg(args[0]));
+}
+
+if (require.main === module) {
+  try { main(); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+}
+
+module.exports = { makeMatrix, svg };

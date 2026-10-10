@@ -181,3 +181,13 @@ test('public pitch state reveals only the selected team company and decisions', 
   assert.equal(output.teams['team-a'].companyId, undefined);
   assert.equal(output.teams['team-c'].companyId, undefined);
 });
+
+test('team spectator remains scoped to its own team during another team pitch', () => {
+  let state = joinedState('team-a', 'device-alpha-1234');
+  state = advance(state, ['round1', 'round2', 'reveal', 'pitch']);
+  state = setActivePitchTeam(state, 'team-b');
+  const output = publicState(state, { teamId: 'team-a', deviceId: 'device-alpha-1234', spectator: true });
+  assert.ok(COMPANY_IDS.includes(output.teams['team-a'].companyId));
+  assert.equal(output.teams['team-b'].companyId, undefined);
+  assert.equal(output.teams['team-b'].round1, undefined);
+});

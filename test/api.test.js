@@ -46,6 +46,57 @@ test('joined code is rejected on another device and accepted again on the origin
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('joined team receives a signed read-only spectator token', async () => {
+  const { dir, store } = setup();
+  const initial = await store.load();
+  const teamId = 'team-b';
+  const code = initial.teams[teamId].accessCode;
+  const join = await handleApiRequest({
+    method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId: 'device-main-1234', teamName: 'ทีมร่วมคิด' }, store, hostKey: 'key',
+  });
+  assert.equal(join.status, 200);
+  assert.match(join.body.spectatorToken, /^[A-Za-z0-9_-]{22}$/);
+
+  await handleApiRequest({ method: 'POST', pathname: '/api/host/phase', headers: { 'x-host-key': 'key' }, body: { phase: 'round1' }, store, hostKey: 'key' });
+  const watched = await handleApiRequest({
+    method: 'GET', pathname: '/api/state', headers: { 'x-spectator-team': teamId, 'x-spectator-token': join.body.spectatorToken }, body: {}, store, hostKey: 'key',
+  });
+  assert.equal(watched.status, 200);
+  assert.equal(watched.body.teams[teamId].companyId, initial.teams[teamId].companyId);
+  assert.equal(watched.body.teams['team-a'].companyId, undefined);
+
+  await handleApiRequest({ method: 'POST', pathname: '/api/host/phase', headers: { 'x-host-key': 'key' }, body: { phase: 'round2' }, store, hostKey: 'key' });
+  await handleApiRequest({ method: 'POST', pathname: '/api/host/phase', headers: { 'x-host-key': 'key' }, body: { phase: 'reveal' }, store, hostKey: 'key' });
+  await handleApiRequest({ method: 'POST', pathname: '/api/host/phase', headers: { 'x-host-key': 'key' }, body: { phase: 'pitch' }, store, hostKey: 'key' });
+  const pitchWatch = await handleApiRequest({
+    method: 'GET', pathname: '/api/state', headers: { 'x-spectator-team': teamId, 'x-spectator-token': join.body.spectatorToken }, body: {}, store, hostKey: 'key',
+  });
+  assert.equal(pitchWatch.body.teams[teamId].companyId, initial.teams[teamId].companyId);
+  assert.equal(pitchWatch.body.teams['team-a'].companyId, undefined);
+
+  const invalid = await handleApiRequest({
+    method: 'GET', pathname: '/api/state', headers: { 'x-spectator-team': teamId, 'x-spectator-token': 'invalid-token-12345678' }, body: {}, store, hostKey: 'key',
+  });
+  assert.equal(invalid.status, 401);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('spectator credentials never authorize team submissions', async () => {
+  const { dir, store } = setup();
+  const initial = await store.load();
+  const teamId = 'team-a';
+  const code = initial.teams[teamId].accessCode;
+  const join = await handleApiRequest({
+    method: 'POST', pathname: '/api/join', headers: {}, body: { code, deviceId: 'device-main-1234', teamName: 'ทีมหลัก' }, store, hostKey: 'key',
+  });
+  await handleApiRequest({ method: 'POST', pathname: '/api/host/phase', headers: { 'x-host-key': 'key' }, body: { phase: 'round1' }, store, hostKey: 'key' });
+  const denied = await handleApiRequest({
+    method: 'POST', pathname: `/api/teams/${teamId}/submissions/1`, headers: { 'x-spectator-team': teamId, 'x-spectator-token': join.body.spectatorToken }, body: decision, store, hostKey: 'key',
+  });
+  assert.equal(denied.status, 401);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('team-scoped state and mutations require matching code and bound device', async () => {
   const { dir, store } = setup();
   const initial = await store.load();

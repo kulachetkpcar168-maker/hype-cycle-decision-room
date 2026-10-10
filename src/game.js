@@ -7,7 +7,7 @@ const STAGES = ['innovation', 'peak', 'trough', 'slope', 'plateau'];
 const ACTIONS = ['invest', 'pilot', 'wait', 'stop'];
 const BASE_EVIDENCE_IDS = [
   'company_volume', 'two_thirds', 'fte_equivalent', 'fast_resolution',
-  'repeat_drop', 'languages', 'profit_projection', 'company_reported',
+  'repeat_drop', 'languages', 'profit_projection',
 ];
 const NEW_EVIDENCE_IDS = [
   'human_choice', 'complex_escalation', 'quality_tradeoff', 'hybrid_model', 'workflow_matters',
@@ -185,7 +185,7 @@ function publicState(state, viewer = {}) {
         submittedRound1: Boolean(team.round1),
         submittedRound2: Boolean(team.round2),
       };
-      if ((scoped && id === viewer.teamId) || id === pitchTeam) {
+      if ((scoped && id === viewer.teamId) || (!viewer.spectator && id === pitchTeam)) {
         safe.companyId = team.companyId;
         safe.round1 = clone(team.round1);
         safe.round2 = clone(team.round2);

@@ -12,6 +12,17 @@ test('player joins with a four-character code and validated team name', () => {
   assert.doesNotMatch(player, /data-team=/); assert.match(player, /hype-team-code/); assert.match(player, /hype-device-id/);
 });
 
+test('main team device shows a QR invite for read-only spectators', () => {
+  const player = read('public/player.js');
+  const html = read('public/index.html');
+  assert.match(html, /qr\.js/);
+  assert.ok(html.indexOf('/qr.js') < html.indexOf('/player.js'));
+  for (const token of ['spectatorToken', 'spectatorInvite', 'สร้าง QR ให้สมาชิกในทีม', 'ดูอย่างเดียว', 'window.BrowserQr.svgDataUrl']) assert.ok(player.includes(token), token);
+  assert.match(player, /URLSearchParams/);
+  assert.match(player, /x-spectator-token/);
+  assert.match(player, /x-spectator-team/);
+});
+
 test('player has timer, submitted editing flow, and round two evidence', () => {
   const player = read('public/player.js');
   for (const token of ['roundEndsAt', 'warning', 'ส่งคำตอบแล้ว', 'แก้ไขคำตอบ', 'คำตอบ Round 1 ของทีม', 'ข้อมูลใหม่', 'evidenceCards(C.evidence)']) assert.match(player, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -29,8 +40,8 @@ test('player stage choice includes accessible inline Hype Cycle SVG and Thai exp
   const player = read('public/player.js');
   assert.match(player, /<svg[^>]+hype-cycle-chart/); assert.match(player, /role="img"/); assert.match(player, /aria-labelledby/);
   assert.match(player, /stage-point/); assert.match(player, /stage-explanation/); assert.match(player, /addEventListener\('change'/);
-  assert.match(player, /<fieldset class="field"><legend>Hype Cycle Stage<\/legend>/);
-  assert.match(player, /<fieldset class="field"><legend>Action<\/legend>/);
+  assert.match(player, /<fieldset class="field"><legend>Hype Cycle Stage ของ Klarna AI<\/legend>/);
+  assert.match(player, /<fieldset class="field"><legend>Action ของบริษัทคุณเกี่ยวกับ AI<\/legend>/);
 });
 
 test('player polling preserves an active unsent draft when another team changes state', () => {
@@ -67,18 +78,24 @@ test('selected-team pitch shows both rounds with each round evidence and risk', 
   for (const token of ['pitchDecisionCard', "pitchDecisionCard(t.round1,'Before')", "pitchDecisionCard(t.round2,'After')", 'Evidence ที่มีอิทธิพลที่สุด', 'ความเสี่ยงหลัก']) assert.ok(host.includes(token), token);
   assert.doesNotMatch(host, /Evidence ที่เปลี่ยนคำตัดสิน/);
   assert.doesNotMatch(host, /latest=t\.round2\|\|t\.round1/);
+  assert.match(host, /pitchStageGraph/);
+  assert.match(host, /stage-point/);
 });
 
 test('decision dropdown labels use clear Thai business language', () => {
   const common = read('public/common.js');
-  for (const text of ['AI รับผิดชอบแชตประมาณ 2 ใน 3', 'เวลาแก้ปัญหาลดจาก 11 เหลือไม่ถึง 2 นาที', 'Klarna คาดว่ากำไรดีขึ้น $40M ในปี 2024', 'ข้อควรระวัง: ตัวเลขมาจากบริษัท', 'เคสซับซ้อนต้องส่งต่อให้คน', 'ความยากในการเชื่อมระบบ ข้อมูล และ Workflow', 'ความเสียหายจากคำตอบหรือการตัดสินใจผิด']) assert.ok(common.includes(text), text);
+  for (const text of ['AI รับผิดชอบแชตประมาณ 2 ใน 3', 'เวลาแก้ปัญหาลดจาก 11 เหลือไม่ถึง 2 นาที', 'Klarna คาดว่ากำไรดีขึ้น $40M ในปี 2024', 'เคสซับซ้อนต้องส่งต่อให้คน', 'ความยากในการเชื่อมระบบ ข้อมูล และ Workflow', 'ความเสียหายจากคำตอบหรือการตัดสินใจผิด']) assert.ok(common.includes(text), text);
+  assert.doesNotMatch(common, /ข้อควรระวัง:\s*ตัวเลขมาจากบริษัท/);
+  assert.doesNotMatch(common, /id:'company_reported'/);
   assert.doesNotMatch(common, /กำไรเพิ่ม \$40M ต่อปี/);
 });
 
-test('takeaway phase supports a five-minute four-slide debrief', () => {
+test('takeaway phase gives one human one-page Klarna answer and five Hype Cycle lessons', () => {
   const host = read('public/host.js');
-  for (const token of ['takeawaySlides', 'สรุปกรณี Klarna', 'จาก Evidence สู่ Hype Cycle', 'ทำอะไรต่อในแต่ละ Stage', '5 Key Takeaways', 'Peak → Trough / Slope', 'Experiment', 'ตรวจสมมติฐาน', 'ปรับ use case', 'Scale อย่างมีวินัย', 'Stage ไม่ใช่คะแนน']) assert.ok(host.includes(token), token);
-  assert.match(host, /สรุปบทเรียน · สไลด์/);
+  const common = read('public/common.js');
+  for (const token of ['Klarna ทำอะไร', 'Klarna ควรทำอะไรต่อ', 'Hybrid service', 'AI รับงานมาตรฐาน', 'คนรับช่วงเคสซับซ้อน', 'คำตอบแนะนำ']) assert.ok(host.includes(token) || common.includes(token), token);
+  for (const token of ['Hype มาก่อน Value', 'Trough คือช่วงคัดกรอง', 'คนละ Stage คนละ Strategy', 'Timing สำคัญ', 'ตัดสินใจจาก Data ไม่ใช่ Noise']) assert.ok(common.includes(token), token);
+  assert.doesNotMatch(host, /takeawaySlides|สไลด์ 1\/4|สไลด์ 4\/4/);
 });
 
 test('host loads the key-form polling gate before dashboard code', () => {

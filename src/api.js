@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { hostKeysEqual } = require('./request-policy');
 const {
   createInitialState,
@@ -31,14 +32,30 @@ function validPlayer(state, credentials) {
     && team.deviceId === credentials.deviceId;
 }
 
+function spectatorToken(state, teamId, hostKey) {
+  const team = state.teams[teamId];
+  if (!team || !team.joined) return '';
+  return crypto.createHmac('sha256', String(hostKey)).update(`${state.roomId}:${teamId}:${team.accessCode}`).digest('base64url').slice(0, 22);
+}
+
+function validSpectator(state, headers, hostKey) {
+  const teamId = headers['x-spectator-team'];
+  const supplied = headers['x-spectator-token'];
+  const expected = spectatorToken(state, teamId, hostKey);
+  return Boolean(expected) && hostKeysEqual(expected, supplied);
+}
+
 async function handleApiRequest({ method, pathname, headers = {}, body = {}, store, hostKey }) {
   try {
     if (pathname === '/api/state' && method === 'GET') {
       const state = await store.load();
       const credentials = playerCredentials(headers);
+      const spectatorRequested = Boolean(headers['x-spectator-team'] || headers['x-spectator-token']);
+      const spectatorValid = spectatorRequested && validSpectator(state, headers, hostKey);
+      if (spectatorRequested && !spectatorValid) return { status: 401, body: { error: 'Invalid spectator link' } };
       const viewer = validPlayer(state, credentials)
         ? { teamId: credentials.teamId, deviceId: credentials.deviceId }
-        : {};
+        : spectatorValid ? { teamId: headers['x-spectator-team'], deviceId: state.teams[headers['x-spectator-team']].deviceId, spectator: true } : {};
       return { status: 200, body: publicState(state, viewer) };
     }
 
@@ -59,6 +76,7 @@ async function handleApiRequest({ method, pathname, headers = {}, body = {}, sto
         status: 200,
         body: {
           teamId: joined.teamId,
+          spectatorToken: spectatorToken(state, joined.teamId, hostKey),
           state: publicState(state, { teamId: joined.teamId, deviceId: body.deviceId }),
         },
       };
