@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
@@ -21,6 +22,74 @@ test('main team device shows a QR invite for read-only spectators', () => {
   assert.match(player, /URLSearchParams/);
   assert.match(player, /x-spectator-token/);
   assert.match(player, /x-spectator-team/);
+});
+
+test('spectator mirrors the player decision page with disabled controls', () => {
+  const player = read('public/player.js');
+  for (const token of ['decisionPage', 'decisionPage(round,true)', 'disabled aria-disabled="true"', 'เครื่องหลักเป็นผู้ส่งคำตอบ', 'spectatorView']) assert.ok(player.includes(token), token);
+  assert.match(player, /choice\('stage',id,l,p\.stage,readOnly\)/);
+  assert.match(player, /choice\('action',id,l,p\.action,readOnly\)/);
+});
+
+test('spectator renderer executes all phases and keeps decision controls read-only', () => {
+  const app = { innerHTML: '' };
+  const toast = { textContent: '', classList: { add() {}, remove() {} } };
+  const storage = new Map();
+  const document = {
+    hidden: false,
+    querySelector(selector) { if (selector === '#app') return app; if (selector === '#toast') return toast; return null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+  };
+  const context = {
+    window: {
+      __ENABLE_PLAYER_VIEW_TESTS__: true,
+      SessionGuard: { createSessionGuard: () => ({ capture: () => 0, isCurrent: () => true, advance() {} }) },
+      VisibilityPolling: { createVisibilityPoller: () => ({ start() {} }) },
+      BrowserQr: { svgDataUrl: () => '' },
+    },
+    document,
+    location: { search: '?s=a.test-token', origin: 'http://example.test' },
+    localStorage: { getItem: (key) => storage.get(key) || '', setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
+    URLSearchParams,
+    crypto: require('node:crypto'),
+    structuredClone,
+    FormData,
+    fetch: async () => ({ ok: true, json: async () => ({}) }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    console,
+  };
+  vm.createContext(context);
+  vm.runInContext(read('public/common.js'), context);
+  vm.runInContext(read('public/player.js'), context);
+  const decision = { stage: 'peak', action: 'pilot', mostInfluentialEvidence: 'fast_resolution', mainRisk: 'service_quality' };
+  const team = { id: 'team-a', label: 'Team A', teamName: 'ทีมทดสอบ', companyId: 'startup', joined: true, round1: decision, round2: decision };
+  const state = { roomId: 'room-test', phase: 'lobby', phaseStartedAt: null, roundEndsAt: null, activePitchTeam: 'team-a', updatedAt: new Date().toISOString(), teams: { 'team-a': team, 'team-b': { id: 'team-b', label: 'Team B' }, 'team-c': { id: 'team-c', label: 'Team C' } } };
+  for (const phase of ['lobby', 'round1', 'round2', 'reveal', 'pitch', 'takeaway']) {
+    const html = context.window.PlayerViewTest.spectator({ ...state, phase }, 'team-a');
+    assert.match(html, /โหมดสมาชิกทีม · ดูอย่างเดียว/, phase);
+    assert.doesNotMatch(html, /on(?:click|submit|change)=/i, phase);
+    if (phase === 'round1' || phase === 'round2') {
+      assert.match(html, /id="decision-form-readonly"/, phase);
+      const form = html.match(/<form id="decision-form-readonly"[\s\S]*?<\/form>/)?.[0] || '';
+      const controls = form.match(/<(?:input|select|button)\b[^>]*>/g) || [];
+      assert.ok(controls.length >= 12, phase);
+      for (const control of controls) assert.match(control, /\bdisabled\b/, `${phase}: ${control}`);
+      assert.match(form, /<label for="evidence-choice">/);
+      assert.match(form, /<select id="evidence-choice"/);
+      assert.match(form, /<label for="risk-choice">/);
+      assert.match(form, /<select id="risk-choice"/);
+    }
+  }
+});
+
+test('player app avoids announcing the round timer as a live region', () => {
+  const html = read('public/index.html');
+  assert.match(html, /<main id="app" class="shell"><\/main>/);
+  assert.doesNotMatch(html, /<main[^>]+aria-live/);
+  assert.match(html, /id="toast"[^>]+aria-live="polite"/);
 });
 
 test('player has timer, submitted editing flow, and round two evidence', () => {
